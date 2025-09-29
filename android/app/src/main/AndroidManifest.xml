@@ -1,42 +1,29 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.imtiaz">
 
-    <!-- ✅ Internet & Network Permissions -->
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- ✅ Audio/Video Permissions -->
-    <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-
-    <!-- ✅ Storage permissions (for sending images, files, etc.) -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28"/>
-
-    <!-- ✅ Android 13+ media permissions -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
-
-    <!-- ✅ Foreground Service (for calls/notifications) -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
-
-    <!-- ✅ Vibration -->
-    <uses-permission android:name="android.permission.VIBRATE"/>
-
-    <!-- ✅ Notifications (Android 13+) -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Permissions -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
-        android:label="MeChat"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:label="MeChat"
+        android:icon="@mipmap/launcher_icon"
+        android:usesCleartextTraffic="true">
 
         <!-- FileProvider -->
         <provider
@@ -46,10 +33,10 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/provider_paths"/>
+                android:resource="@xml/provider_paths" />
         </provider>
 
-        <!-- ✅ Main Activity -->
+        <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -58,33 +45,70 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
-            
+
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
-                android:resource="@style/NormalTheme"/>
-            
+                android:resource="@style/NormalTheme" />
+
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- ✅ Flutter -->
+        <!-- Flutter v2 Embedding -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- ✅ Zego Prebuilt Call Service -->
+        <!-- Zego Call Invitation Service -->
         <service
             android:name="im.zego.zimkit.services.internal.ZegoUIKitPrebuiltCallInvitationService"
-            android:exported="false"/>
+            android:exported="false" />
+
+        <!-- Zego Push Notification Service -->
+        <service
+            android:name="im.zego.zpns.ZPNsService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="im.zego.zpns.action.MESSAGE" />
+            </intent-filter>
+        </service>
+
+        <!-- Zego Notification Receiver -->
+        <receiver
+            android:name="im.zego.zpns.ZPNsReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="im.zego.zpns.action.MESSAGE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- FCM Messaging Service -->
+        <service
+            android:name="com.example.imtiaz.firebase_services.MyFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Notification Channel for Zego (Optional) -->
+        <meta-data
+            android:name="im.zego.zpns.channel_id"
+            android:value="ZegoCall" />
+        <meta-data
+            android:name="im.zego.zpns.channel_name"
+            android:value="Call Notifications" />
+
     </application>
 
-    <!-- ✅ Queries -->
+    <!-- Queries for intent handling (optional) -->
     <queries>
         <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
         </intent>
     </queries>
 

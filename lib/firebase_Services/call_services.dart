@@ -1,50 +1,103 @@
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:imtiaz/firebase_Services/notification_services.dart';
+import 'package:imtiaz/views/ui_screens/vediocall.dart';
+import 'package:imtiaz/views/ui_screens/vediocalling_screen.dart';
 
-class LocalNotificationService {
-  static final FlutterLocalNotificationsPlugin _notificationsPlugin =
-      FlutterLocalNotificationsPlugin();
 
-  /// Initialize local notification settings
-  static Future<void> initialize() async {
-    const AndroidInitializationSettings androidInit =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+class CallService {
+  static bool _isCallScreenOpen = false;
 
-    const InitializationSettings settings =
-        InitializationSettings(android: androidInit);
+  /// Handle incoming call (receiver side)
+  static void handleIncomingCall(Map<String, dynamic> data) {
+    if (_isCallScreenOpen) return;
 
-    await _notificationsPlugin.initialize(settings);
+    final callerName = data['senderName'] ?? "Unknown";
+    final callerId = data['senderId'] ?? "";
+    final callId = data['callId'] ?? "";
+    final callType = data['callType'] ?? "video";
+
+    _isCallScreenOpen = true;
+    RingtoneService.playRingtone();
+
+    if (Get.context != null) {
+      Get.to(() => IncomingCallScreen(
+            callerName: callerName,
+            callerId: callerId,
+            callId: callId,
+            callType: callType,
+          ))?.then((_) {
+        _isCallScreenOpen = false;
+        RingtoneService.stopRingtone();
+      });
+    }
   }
 
-  /// Show call notification
-  static Future<void> showCallNotification({
+  /// Start a call (caller side)
+  static Future<void> startCall({
+    required String targetToken,
+    required String chatId,
+    required bool isVideo,
     required String callerName,
-    required int id,
+    required String callerId,
   }) async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
-      'call_channel', // channel id
-      'Incoming Calls', // channel name
-      channelDescription: 'This channel is used for incoming call notifications',
-      importance: Importance.max,
-      priority: Priority.high,
-      fullScreenIntent: true, // 🔔 makes it behave like a call popup
-      ongoing: true,
-      autoCancel: false,
+    // 🔔 Send FCM push to receiver
+    await NotificationService.sendPushNotification(
+      targetToken: targetToken,
+      title: "Incoming ${isVideo ? "Video" : "Voice"} Call",
+      body: "$callerName is calling you",
+      type: "call",
+      senderId: callerId,
+      senderName: callerName,
+      chatId: chatId,
+      callId: chatId,
+      callType: isVideo ? "video" : "voice",
+      data: {}, payload: {},
     );
 
-    const NotificationDetails platformDetails =
-        NotificationDetails(android: androidDetails);
-
-    await _notificationsPlugin.show(
-      id,
-      'Incoming Call',
-      'Call from $callerName',
-      platformDetails,
+    // 📞 Caller directly joins call screen
+    Navigator.push(
+      Get.context!,
+      MaterialPageRoute(
+        builder: (_) => VedioCallingScreen(
+          callId: chatId,
+          isVideoCall: isVideo,
+          callerName: callerName,
+          callerId: callerId,
+        ),
+      ),
     );
   }
 
-  /// Cancel a notification
-  static Future<void> cancelNotification(int id) async {
-    await _notificationsPlugin.cancel(id);
+  /// Reject call
+  static void rejectCall() {
+    if (_isCallScreenOpen) {
+      _isCallScreenOpen = false;
+      RingtoneService.stopRingtone();
+      Get.back(); // Close IncomingCallScreen
+    }
+  }
+
+  /// Accept call
+  static void acceptCall({
+    required String callId,
+    required String callerName,
+    required String callerId,
+    required bool isVideo,
+  }) {
+    _isCallScreenOpen = false;
+    RingtoneService.stopRingtone();
+
+    Navigator.pushReplacement(
+      Get.context!,
+      MaterialPageRoute(
+        builder: (_) => VedioCallingScreen(
+          callId: callId,
+          isVideoCall: isVideo,
+          callerName: callerName,
+          callerId: callerId,
+        ),
+      ),
+    );
   }
 }

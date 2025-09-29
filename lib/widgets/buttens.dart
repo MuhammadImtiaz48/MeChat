@@ -24,9 +24,9 @@ class Buttens extends StatelessWidget{
     )
    ), child: icon!= null ?  Row(
     children: [
-      SizedBox(width: 100,),
+      const SizedBox(width: 100,),
       icon!,
-      SizedBox(width: 20,),
+      const SizedBox(width: 20,),
       Text(btname,style: textStyle)
     ],
 

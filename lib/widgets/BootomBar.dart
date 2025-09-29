@@ -14,7 +14,7 @@ class BottomBar {
           height: 160,
           child: Column(
             children: [
-              Text(
+              const Text(
                 'Upload Image',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
@@ -23,8 +23,8 @@ class BottomBar {
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   ElevatedButton.icon(
-                    icon: Icon(Icons.camera_alt),
-                    label: Text("Camera"),
+                    icon: const Icon(Icons.camera_alt),
+                    label: const Text("Camera"),
                     onPressed: () async {
                       Navigator.pop(context);
                       final XFile? photo =
@@ -35,8 +35,8 @@ class BottomBar {
                     },
                   ),
                   ElevatedButton.icon(
-                    icon: Icon(Icons.photo),
-                    label: Text("Gallery"),
+                    icon: const Icon(Icons.photo),
+                    label: const Text("Gallery"),
                     onPressed: () async {
                       Navigator.pop(context);
                       final XFile? image =

@@ -1,331 +1,163 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:imtiaz/models/userchat.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:get/get.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:imtiaz/controllers/app_controller.dart';
+import 'package:imtiaz/controllers/chat_controller.dart';
 import 'package:imtiaz/firebase_Services/notification_services.dart';
+import 'package:imtiaz/models/userchat.dart';
+import 'package:imtiaz/views/ui_screens/user_profile.dart';
+import 'package:imtiaz/widgets/chatmaasgeCard.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
-import 'package:imtiaz/main.dart'; // for flutterLocalNotificationsPlugin & navigatorKey
+import 'package:google_fonts/google_fonts.dart';
 
 class ChatScreen extends StatefulWidget {
-  final String receiverId;
-  final String receiverName;
-  final String receiverFcmToken;
+  final UserchatModel user;
+  final String loggedInUserName;
 
   const ChatScreen({
     super.key,
-    required this.receiverId,
-    required this.receiverName,
-    required this.receiverFcmToken, 
-    required String receiverEmail, 
-    required UserchatModel user,
+    required this.user,
+    required this.loggedInUserName,
   });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateMixin {
-  final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
-  final _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-
-  late final String currentUserId;
-  late final String chatRoomId;
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
+class _ChatScreenState extends State<ChatScreen> {
+  late final TextEditingController msgController;
+  late final ScrollController scrollController;
+  late final FocusNode focusNode;
+  late final ChatController controller;
+  late final AppController appController;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _isCalling = false;
 
   @override
   void initState() {
     super.initState();
-    currentUserId = _auth.currentUser!.uid;
-
-    chatRoomId = currentUserId.hashCode <= widget.receiverId.hashCode
-        ? "${currentUserId}_${widget.receiverId}"
-        : "${widget.receiverId}_$currentUserId";
-    
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    );
-    
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeInOut,
-      ),
-    );
-    
-    _scaleAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeOutBack,
-      ),
-    );
-    
-    _animationController.forward();
+    if (kDebugMode) {
+      debugPrint('ChatScreen: Initializing for user ${widget.user.uid} at ${DateTime.now()}');
+    }
+    Get.put(ChatController(user: widget.user, loggedInUserName: widget.loggedInUserName), tag: widget.user.uid);
+    NotificationService.setCurrentChatId(widget.user.uid);
+    controller = Get.find<ChatController>(tag: widget.user.uid); // Moved before NotificationService.init
+    NotificationService.init(onNotificationTap: (payload) async {
+      if (payload['type'] == 'call' && payload['chatId'] == widget.user.uid) {
+        final callType = payload['callType'] ?? 'voice';
+        final callId = payload['callId'] ?? controller.chatRoomId; // Fallback to chatRoomId
+        if (kDebugMode) {
+          debugPrint('ChatScreen: Handling call notification tap: $payload');
+        }
+        Get.to(() => ZegoUIKitPrebuiltCall(
+              appID: 116174848,
+              appSign: '07f8d98822d54bc39ffc058f2c0a2b638930ba0c37156225bac798ae0f90f679',
+              userID: FirebaseAuth.instance.currentUser!.uid,
+              userName: widget.loggedInUserName.isNotEmpty ? widget.loggedInUserName : 'User',
+              callID: callId, // Use non-null callId
+              config: callType == 'video'
+                  ? ZegoUIKitPrebuiltCallConfig.oneOnOneVideoCall()
+                  : ZegoUIKitPrebuiltCallConfig.oneOnOneVoiceCall(),
+            ));
+      } else if (payload['type'] == 'message') {
+        Get.toNamed('/chat', arguments: {
+          'user': widget.user,
+          'loggedInUserName': widget.loggedInUserName,
+        });
+      }
+    });
+    msgController = TextEditingController();
+    scrollController = ScrollController();
+    focusNode = FocusNode();
+    appController = Get.find<AppController>();
+    _initializeConnectivity();
+    SchedulerBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
-  @override
-  void dispose() {
-    _messageController.dispose();
-    _scrollController.dispose();
-    _animationController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _markMessagesAsSeen(QuerySnapshot snapshot) async {
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['receiverId'] == currentUserId && (data['seen'] == false)) {
-        await doc.reference.update({'seen': true});
+  Future<void> _initializeConnectivity() async {
+    try {
+      if (kDebugMode) {
+        debugPrint('ChatScreen: Checking connectivity');
+      }
+      final connectivityResult = await Connectivity().checkConnectivity().timeout(const Duration(seconds: 5));
+      controller.isOnline.value = !connectivityResult.contains(ConnectivityResult.none);
+      if (!controller.isOnline.value && mounted) {
+        _showSnackBar('Offline', 'Showing cached messages. Sending disabled.', Colors.orange);
+      }
+      _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+        final isOnline = !results.contains(ConnectivityResult.none);
+        controller.isOnline.value = isOnline;
+        if (!isOnline && mounted) {
+          _showSnackBar('Offline', 'Showing cached messages. Sending disabled.', Colors.orange);
+        } else {
+          controller.listenToLastSeen();
+        }
+      });
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ ChatScreen: Connectivity error: $e');
+      }
+      controller.isOnline.value = false;
+      if (mounted) {
+        _showSnackBar('Error', 'Unable to check network connection', Colors.red);
       }
     }
   }
 
-  Future<void> _sendMessage() async {
-    final text = _messageController.text.trim();
-    if (text.isEmpty) return;
-
-    _messageController.clear();
-
-    await _firestore
-        .collection('chats')
-        .doc(chatRoomId)
-        .collection('messages')
-        .add({
-      'senderId': currentUserId,
-      'receiverId': widget.receiverId,
-      'message': text,
-      'timestamp': FieldValue.serverTimestamp(),
-      'seen': false,
-    });
-
-    // 🔔 Push notification to receiver
-    final senderName = _auth.currentUser?.displayName ?? 'Someone';
-    await NotificationService.sendMessagePush(
-      toToken: widget.receiverFcmToken,
-      senderName: senderName,
-      previewText: text,
-      chatId: chatRoomId,
-    );
-
-    // Scroll to bottom after sending message
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          0,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+  @override
+  void dispose() {
+    if (kDebugMode) {
+      debugPrint('ChatScreen: Disposing for user ${widget.user.uid} at ${DateTime.now()}');
+    }
+    NotificationService.setCurrentChatId(null);
+    _connectivitySubscription?.cancel();
+    msgController.dispose();
+    scrollController.dispose();
+    focusNode.dispose();
+    Get.delete<ChatController>(tag: widget.user.uid);
+    super.dispose();
   }
 
-  Future<void> _deleteMessage(String docId) async {
-    await _firestore
-        .collection('chats')
-        .doc(chatRoomId)
-        .collection('messages')
-        .doc(docId)
-        .delete();
+  void _scrollToBottom() {
+    if (scrollController.hasClients) {
+      scrollController.animateTo(
+        scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
-  void _startCall({required bool video}) async {
-    final callerName = _auth.currentUser?.displayName ?? 'Unknown';
-    final callType = video ? 'video' : 'voice';
-
-    // 🔔 Push notification to receiver
-    await NotificationService.sendCallInvite(
-      toToken: widget.receiverFcmToken,
-      callerName: callerName,
-      callId: chatRoomId,
-      callType: callType,
-    );
-
-    // ✅ Local notification with ringtone
-    await NotificationService.showCallNotification(
-      callerName: callerName,
-      callId: chatRoomId,
-      callType: callType,
-    );
-
-    // Open Zego Call Screen
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ZegoUIKitPrebuiltCall(
-          appID: 116174848,
-          appSign:
-              '07f8d98822d54bc39ffc058f2c0a2b638930ba0c37156225bac798ae0f90f679',
-          userID: currentUserId,
-          userName: callerName,
-          callID: chatRoomId,
-          config: video
-              ? ZegoUIKitPrebuiltCallConfig.oneOnOneVideoCall()
-              : ZegoUIKitPrebuiltCallConfig.oneOnOneVoiceCall(),
+  void _showSnackBar(String title, String message, Color backgroundColor) {
+    if (Get.isSnackbarOpen) Get.closeAllSnackbars();
+    Get.snackbar(
+      title,
+      message,
+      backgroundColor: backgroundColor,
+      colorText: Colors.white,
+      snackPosition: SnackPosition.TOP,
+      borderRadius: 10.r,
+      margin: EdgeInsets.all(16.w),
+      duration: const Duration(seconds: 3),
+      titleText: Text(
+        title,
+        style: GoogleFonts.poppins(
+          fontSize: 16.sp,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
         ),
       ),
-    );
-  }
-
-  Widget _bubble(DocumentSnapshot doc, int index) {
-    final data = doc.data() as Map<String, dynamic>;
-    final isMe = data['senderId'] == currentUserId;
-
-    return FadeTransition(
-      opacity: Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-          parent: _animationController,
-          curve: Interval(0.1 * index, 1.0, curve: Curves.easeIn),
-        ),
-      ),
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: Offset(isMe ? 1.0 : -1.0, 0.0),
-          end: Offset.zero,
-        ).animate(
-          CurvedAnimation(
-            parent: _animationController,
-            curve: Interval(0.1 * index, 1.0, curve: Curves.easeOut),
-          ),
-        ),
-        child: GestureDetector(
-          onLongPress: () {
-            if (isMe) {
-              showDialog(
-                context: context,
-                builder: (ctx) => Dialog(
-                  backgroundColor: Colors.transparent,
-                  child: ScaleTransition(
-                    scale: _scaleAnimation,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            'Delete Message?',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              ElevatedButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.grey[300],
-                                  foregroundColor: Colors.black,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                child: const Text('Cancel'),
-                              ),
-                              ElevatedButton(
-                                onPressed: () async {
-                                  await _deleteMessage(doc.id);
-                                  if (mounted) Navigator.pop(ctx);
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.redAccent,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }
-          },
-          child: Align(
-            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: isMe
-                      ? [const Color(0xFF6A11CB), const Color(0xFF2575FC)]
-                      : [Colors.grey.shade200, Colors.grey.shade100],
-                ),
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(20),
-                  topRight: const Radius.circular(20),
-                  bottomLeft: isMe ? const Radius.circular(20) : const Radius.circular(4),
-                  bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(20),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment:
-                    isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    data['message'] ?? '',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: isMe ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        data['timestamp'] == null
-                            ? ''
-                            : (data['timestamp'] as Timestamp)
-                                .toDate()
-                                .toLocal()
-                                .toString()
-                                .substring(11, 16),
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: isMe ? Colors.white70 : Colors.black54,
-                        ),
-                      ),
-                      if (isMe) ...[
-                        const SizedBox(width: 6),
-                        Icon(
-                          (data['seen'] == true) ? Icons.done_all : Icons.check,
-                          size: 14,
-                          color: (data['seen'] == true)
-                              ? Colors.greenAccent
-                              : (isMe ? Colors.white70 : Colors.black54),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
+      messageText: Text(
+        message,
+        style: GoogleFonts.poppins(
+          fontSize: 14.sp,
+          color: Colors.white,
         ),
       ),
     );
@@ -333,180 +165,555 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    final messagesStream = _firestore
-        .collection('chats')
-        .doc(chatRoomId)
-        .collection('messages')
-        .orderBy('timestamp', descending: true)
-        .snapshots();
+    return ScreenUtilInit(
+      designSize: const Size(360, 780),
+      minTextAdapt: true,
+      splitScreenMode: true,
+      builder: (context, child) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        final screenHeight = MediaQuery.of(context).size.height;
+        final isTablet = screenWidth >= 600;
+        final isSmallScreen = screenWidth < 360;
+        final isTallScreen = screenHeight > 750;
 
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF6A11CB),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: FadeTransition(
-          opacity: _fadeAnimation,
-          child: Text(
-            widget.receiverName,
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        actions: [
-          ScaleTransition(
-            scale: _scaleAnimation,
-            child: IconButton(
-              icon: const Icon(Icons.videocam, size: 26),
-              onPressed: () => _startCall(video: true),
-            ),
-          ),
-          ScaleTransition(
-            scale: _scaleAnimation,
-            child: IconButton(
-              icon: const Icon(Icons.call, size: 26),
-              onPressed: () => _startCall(video: false),
-            ),
-          ),
-        ],
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF6A11CB),
-              Color(0xFF2575FC),
-            ],
-          ),
-        ),
-        child: Column(
-          children: [
-            Expanded(
-              child: Container(
-                margin: const EdgeInsets.only(top: 10),
+        final appBarHeight = isTablet ? 80.h : isTallScreen ? 64.h : 56.h;
+        final avatarRadius = isSmallScreen ? 20.r : isTablet ? 28.r : 24.r;
+        final fontSizeTitle = isSmallScreen ? 14.sp : isTablet ? 18.sp : 16.sp;
+        final fontSizeSubtitle = isSmallScreen ? 10.sp : isTablet ? 13.sp : 11.sp;
+        final fontSizeTyping = isTablet ? 15.sp : isTallScreen ? 14.sp : 13.sp;
+        final iconSize = isSmallScreen ? 20.w : isTablet ? 24.w : 22.w;
+        final paddingHorizontal = isSmallScreen ? 8.w : screenWidth * 0.02;
+        final paddingVertical = isTallScreen ? 8.h : 6.h;
+
+        return Scaffold(
+          backgroundColor: const Color(0xFFECE5DD),
+          appBar: PreferredSize(
+            preferredSize: Size.fromHeight(appBarHeight),
+            child: AppBar(
+              backgroundColor: const Color(0xFF075E54),
+              elevation: 0,
+              toolbarHeight: appBarHeight,
+              flexibleSpace: Container(
                 decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(30),
-                    topRight: Radius.circular(30),
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF075E54), Color.fromARGB(255, 37, 224, 202)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
                 ),
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: messagesStream,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: CircularProgressIndicator(
-                          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6A11CB)),
-                        ),
-                      );
-                    }
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline,
-                              size: 60,
-                              color: Colors.grey[300],
-                            ),
-                            const SizedBox(height: 16),
-                            const Text(
-                              'No messages yet',
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.grey,
+              ),
+              leadingWidth: isSmallScreen ? 80.w : isTablet ? 100.w : 90.w,
+              leading: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(left: paddingHorizontal * 0.5, right: paddingHorizontal * 0.2),
+                    child: IconButton(
+                      constraints: BoxConstraints(maxWidth: isSmallScreen ? 20.w : 24.w),
+                      padding: EdgeInsets.zero,
+                      icon: Icon(Icons.arrow_back, color: Colors.white, size: iconSize * 0.8),
+                      onPressed: () => Get.back(),
+                      tooltip: 'Back',
+                    ),
+                  ),
+                  Flexible(
+                    child: CircleAvatar(
+                      radius: avatarRadius,
+                      backgroundColor: Colors.grey[400],
+                      backgroundImage: widget.user.profilePic.isNotEmpty ? NetworkImage(widget.user.profilePic) : null,
+                      child: widget.user.profilePic.isEmpty
+                          ? Text(
+                              widget.user.name.isNotEmpty ? widget.user.name[0].toUpperCase() : '?',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: avatarRadius * 1.1,
+                                fontWeight: FontWeight.w600,
                               ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Start a conversation',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
+                            )
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+              title: GestureDetector(
+                onTap: () async {
+                  for (int i = 0; i < 3; i++) {
+                    try {
+                      if (kDebugMode) {
+                        debugPrint('ChatScreen: Loading profile for ${widget.user.uid}');
+                      }
+                      UserchatModel userProfile = widget.user;
+                      if (controller.isOnline.value) {
+                        final userDoc = await FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(widget.user.uid)
+                            .get()
+                            .timeout(const Duration(seconds: 10));
+                        if (userDoc.exists) {
+                          userProfile = UserchatModel.fromMap(userDoc.data()!);
+                        }
+                      }
+                      Get.to(() => UserProfileScreen(user: userProfile, userId: userProfile.uid, userName: userProfile.name));
+                      return;
+                    } catch (e) {
+                      if (kDebugMode) {
+                        debugPrint('❌ ChatScreen: Error loading profile (attempt ${i + 1}): $e');
+                      }
+                      if (i == 2) {
+                        _showSnackBar(
+                          'Error',
+                          'Failed to load profile: ${controller.isOnline.value ? 'Network error' : 'Offline mode'}',
+                          Colors.red,
+                        );
+                      }
+                      await Future.delayed(const Duration(seconds: 2));
                     }
-
-                    // mark unseen -> seen
-                    _markMessagesAsSeen(snapshot.data!);
-
-                    final docs = snapshot.data!.docs;
-                    return ListView.builder(
-                      controller: _scrollController,
-                      reverse: true,
-                      itemCount: docs.length,
-                      itemBuilder: (context, i) => _bubble(docs[i], i),
-                    );
-                  },
+                  }
+                },
+                child: Container(
+                  constraints: BoxConstraints(maxWidth: screenWidth * 0.4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.user.name.isNotEmpty ? widget.user.name : 'Unknown',
+                        style: GoogleFonts.poppins(
+                          fontSize: fontSizeTitle,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                      SizedBox(height: isTablet ? 3.h : 2.h),
+                      Obx(() => Text(
+                            controller.lastSeen.value.isNotEmpty
+                                ? controller.lastSeen.value
+                                : controller.isOnline.value ? 'Checking status...' : 'Offline',
+                            style: GoogleFonts.poppins(
+                              fontSize: fontSizeSubtitle,
+                              color: Colors.white70,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          )),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            SafeArea(
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                color: Colors.white,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(25),
-                        ),
-                        child: TextField(
-                          controller: _messageController,
-                          decoration: const InputDecoration(
-                            hintText: 'Type a message...',
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                          ),
-                          onSubmitted: (_) => _sendMessage(),
-                        ),
-                      ),
+              actions: [
+                Obx(() => IconButton(
+                      padding: EdgeInsets.symmetric(horizontal: paddingHorizontal * 0.5),
+                      constraints: BoxConstraints(maxWidth: isSmallScreen ? 30.w : isTablet ? 40.w : 36.w),
+                      icon: _isCalling
+                          ? SizedBox(
+                              width: iconSize * 0.6,
+                              height: iconSize * 0.6,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.w,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Icon(Icons.videocam, color: Colors.white, size: iconSize),
+                      onPressed: controller.isOnline.value && appController.isZegoInitialized.value && !_isCalling
+                          ? () async {
+                              setState(() {
+                                _isCalling = true;
+                              });
+                              try {
+                                await controller.startCall(isVideo: true);
+                                _showSnackBar('Success', 'Video call initiated', Colors.green);
+                              } catch (e) {
+                                _showSnackBar('Error', 'Video call failed: Network issue', Colors.red);
+                              } finally {
+                                setState(() {
+                                  _isCalling = false;
+                                });
+                              }
+                            }
+                          : () => _showSnackBar(
+                                'Error',
+                                controller.isOnline.value ? 'Call service unavailable' : 'Offline mode',
+                                Colors.red,
+                              ),
+                      tooltip: 'Video Call',
+                    )),
+                Obx(() => IconButton(
+                      padding: EdgeInsets.symmetric(horizontal: paddingHorizontal * 0.5),
+                      constraints: BoxConstraints(maxWidth: isSmallScreen ? 30.w : isTablet ? 40.w : 36.w),
+                      icon: _isCalling
+                          ? SizedBox(
+                              width: iconSize * 0.6,
+                              height: iconSize * 0.6,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.w,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Icon(Icons.call, color: Colors.white, size: iconSize),
+                      onPressed: controller.isOnline.value && appController.isZegoInitialized.value && !_isCalling
+                          ? () async {
+                              setState(() {
+                                _isCalling = true;
+                              });
+                              try {
+                                await controller.startCall(isVideo: false);
+                                _showSnackBar('Success', 'Voice call initiated', Colors.green);
+                              } catch (e) {
+                                _showSnackBar('Error', 'Voice call failed: Network issue', Colors.red);
+                              } finally {
+                                setState(() {
+                                  _isCalling = false;
+                                });
+                              }
+                            }
+                          : () => _showSnackBar(
+                                'Error',
+                                controller.isOnline.value ? 'Call service unavailable' : 'Offline mode',
+                                Colors.red,
+                              ),
+                      tooltip: 'Voice Call',
+                    )),
+                PopupMenuButton<String>(
+                  padding: EdgeInsets.only(right: paddingHorizontal * 0.5),
+                  icon: Icon(Icons.more_vert, color: Colors.white, size: iconSize * 0.9),
+                  offset: Offset(0, appBarHeight * 0.8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.r)),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'profile',
+                      child: Text('View Contact', style: GoogleFonts.poppins(fontSize: fontSizeSubtitle)),
                     ),
-                    const SizedBox(width: 8),
-                    ScaleTransition(
-                      scale: _scaleAnimation,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Color(0xFF6A11CB),
-                              Color(0xFF2575FC),
-                            ],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.send, color: Colors.white),
-                          onPressed: _sendMessage,
-                        ),
-                      ),
+                    PopupMenuItem(
+                      value: 'clear',
+                      child: Text('Clear Chat', style: GoogleFonts.poppins(fontSize: fontSizeSubtitle)),
                     ),
                   ],
+                  onSelected: (value) async {
+                    if (value == 'profile') {
+                      for (int i = 0; i < 3; i++) {
+                        try {
+                          if (kDebugMode) {
+                            debugPrint('ChatScreen: Loading profile for ${widget.user.uid}');
+                          }
+                          UserchatModel userProfile = widget.user;
+                          if (controller.isOnline.value) {
+                            final userDoc = await FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(widget.user.uid)
+                                .get()
+                                .timeout(const Duration(seconds: 10));
+                            if (userDoc.exists) {
+                              userProfile = UserchatModel.fromMap(userDoc.data()!);
+                            }
+                          }
+                          Get.to(() => UserProfileScreen(user: userProfile, userId: userProfile.uid, userName: userProfile.name));
+                          return;
+                        } catch (e) {
+                          if (kDebugMode) {
+                            debugPrint('❌ ChatScreen: Error loading profile (attempt ${i + 1}): $e');
+                          }
+                          if (i == 2) {
+                            _showSnackBar(
+                              'Error',
+                              'Failed to load profile: ${controller.isOnline.value ? 'Network error' : 'Offline mode'}',
+                              Colors.red,
+                            );
+                          }
+                          await Future.delayed(const Duration(seconds: 2));
+                        }
+                      }
+                    } else if (value == 'clear') {
+                      Get.dialog(
+                        AlertDialog(
+                          title: Text('Clear Chat', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                          content: Text('Are you sure you want to clear this chat?', style: GoogleFonts.poppins()),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Get.back(),
+                              child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF075E54))),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                for (int i = 0; i < 3; i++) {
+                                  try {
+                                    if (kDebugMode) {
+                                      debugPrint('ChatScreen: Clearing chat for ${controller.chatRoomId}');
+                                    }
+                                    if (controller.isOnline.value) {
+                                      final snapshot = await FirebaseFirestore.instance
+                                          .collection('chats')
+                                          .doc(controller.chatRoomId)
+                                          .collection('messages')
+                                          .get()
+                                          .timeout(const Duration(seconds: 10));
+                                      final batch = FirebaseFirestore.instance.batch();
+                                      for (var doc in snapshot.docs) {
+                                        batch.delete(doc.reference);
+                                      }
+                                      await batch.commit().timeout(const Duration(seconds: 10));
+                                    }
+                                    controller.cachedMessages.clear();
+                                    await controller.cacheMessages([]);
+                                    Get.back();
+                                    _showSnackBar('Success', 'Chat cleared', Colors.green);
+                                    _scrollToBottom();
+                                    return;
+                                  } catch (e) {
+                                    if (kDebugMode) {
+                                      debugPrint('❌ ChatScreen: Error clearing chat (attempt ${i + 1}): $e');
+                                    }
+                                    if (i == 2) {
+                                      _showSnackBar('Error', 'Failed to clear chat: Network error', Colors.red);
+                                    }
+                                    await Future.delayed(const Duration(seconds: 2));
+                                  }
+                                }
+                              },
+                              child: Text('Clear', style: GoogleFonts.poppins(color: Colors.red)),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                  },
                 ),
+              ],
+            ),
+          ),
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFECE5DD), Color(0xFFD8D1C2)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
             ),
-          ],
-        ),
-      ),
+            child: Column(
+              children: [
+                Obx(() {
+                  if (!controller.isOnline.value) {
+                    return Container(
+                      color: Colors.orange[100],
+                      padding: EdgeInsets.symmetric(vertical: 6.h),
+                      child: Center(
+                        child: Text(
+                          'Offline: Showing cached messages',
+                          style: GoogleFonts.poppins(
+                            fontSize: fontSizeSubtitle,
+                            color: Colors.orange[800],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                }),
+                Expanded(
+                  child: Obx(() => StreamBuilder<QuerySnapshot>(
+                        stream: controller.isOnline.value
+                            ? FirebaseFirestore.instance
+                                .collection('chats')
+                                .doc(controller.chatRoomId)
+                                .collection('messages')
+                                .orderBy('timestamp', descending: true)
+                                .limit(30)
+                                .snapshots()
+                            : null,
+                        builder: (context, snapshot) {
+                          if (!controller.isOnline.value) {
+                            return ListView.builder(
+                              controller: scrollController,
+                              reverse: true,
+                              padding: EdgeInsets.symmetric(vertical: paddingVertical, horizontal: paddingHorizontal),
+                              itemCount: controller.cachedMessages.length,
+                              itemBuilder: (context, index) {
+                                final msg = controller.cachedMessages[index];
+                                final isMe = msg['senderId'] == FirebaseAuth.instance.currentUser!.uid;
+                                DateTime time;
+                                try {
+                                  time = msg['timestamp'] is Timestamp
+                                      ? (msg['timestamp'] as Timestamp).toDate()
+                                      : (msg['timestamp'] is String
+                                          ? DateTime.parse(msg['timestamp'])
+                                          : DateTime.now());
+                                } catch (e) {
+                                  time = DateTime.now();
+                                  if (kDebugMode) {
+                                    debugPrint('❌ ChatScreen: Error parsing timestamp: $e');
+                                  }
+                                }
+                                return ChatMessageCard(
+                                  currentUserId: FirebaseAuth.instance.currentUser!.uid,
+                                  senderId: msg['senderId'],
+                                  senderName: isMe ? controller.myName.value : widget.user.name,
+                                  message: msg['message'],
+                                  time: time,
+                                  seen: msg['seen'] ?? false,
+                                  showSeen: isMe,
+                                  maxWidth: screenWidth * 0.75,
+                                );
+                              },
+                            );
+                          }
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Center(child: CircularProgressIndicator(color: Color(0xFF075E54)));
+                          }
+                          if (snapshot.hasError) {
+                            if (kDebugMode) {
+                              debugPrint('❌ ChatScreen: Stream error: ${snapshot.error}');
+                            }
+                            return Center(
+                              child: Text(
+                                'Error loading messages',
+                                style: GoogleFonts.poppins(fontSize: isTablet ? 16.sp : 14.sp, color: Colors.red),
+                              ),
+                            );
+                          }
+                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                            return Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    controller.isOnline.value ? Icons.chat : Icons.cloud_off,
+                                    size: isTablet ? 70.w : 50.w,
+                                    color: Colors.grey[400],
+                                  ),
+                                  SizedBox(height: 15.h),
+                                  Text(
+                                    controller.isOnline.value ? 'Start a conversation' : 'Offline: No cached messages',
+                                    style: GoogleFonts.poppins(fontSize: isTablet ? 16.sp : 14.sp, color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+
+                          final messages = snapshot.data!.docs;
+                          SchedulerBinding.instance.addPostFrameCallback((_) {
+                            controller.markMessagesSeen();
+                            _scrollToBottom();
+                          });
+
+                          return ListView.builder(
+                            controller: scrollController,
+                            reverse: true,
+                            padding: EdgeInsets.symmetric(vertical: paddingVertical, horizontal: paddingHorizontal),
+                            itemCount: messages.length,
+                            itemBuilder: (context, index) {
+                              final msg = messages[index].data() as Map<String, dynamic>;
+                              final isMe = msg['senderId'] == FirebaseAuth.instance.currentUser!.uid;
+                              return ChatMessageCard(
+                                currentUserId: FirebaseAuth.instance.currentUser!.uid,
+                                senderId: msg['senderId'],
+                                senderName: isMe ? controller.myName.value : widget.user.name,
+                                message: msg['message'],
+                                time: (msg['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+                                seen: msg['seen'] ?? false,
+                                showSeen: isMe,
+                                maxWidth: screenWidth * 0.75,
+                              );
+                            },
+                          );
+                        },
+                      )),
+                ),
+                Obx(() => StreamBuilder<DocumentSnapshot>(
+                      stream: controller.isOnline.value
+                          ? FirebaseFirestore.instance.collection('chats').doc(controller.chatRoomId).snapshots()
+                          : null,
+                      builder: (context, snapshot) {
+                        if (controller.isOnline.value && snapshot.hasData && snapshot.data!.exists) {
+                          final data = snapshot.data!.data() as Map<String, dynamic>?;
+                          final isTyping = data?['typing_${widget.user.uid}'] as bool? ?? false;
+                          if (isTyping) {
+                            return Container(
+                              padding: EdgeInsets.symmetric(horizontal: paddingHorizontal + 6.w, vertical: paddingVertical),
+                              color: const Color(0xFFECE5DD),
+                              child: Text(
+                                'Typing...',
+                                style: GoogleFonts.poppins(
+                                  fontStyle: FontStyle.italic,
+                                  color: const Color(0xFF075E54),
+                                  fontSize: fontSizeTyping,
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    )),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: paddingHorizontal, vertical: paddingVertical),
+                  color: Colors.white,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(25.r),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 4.r,
+                                offset: Offset(0, 2.h),
+                              ),
+                            ],
+                          ),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxHeight: isTallScreen ? 100.h : 80.h),
+                            child: TextField(
+                              controller: msgController,
+                              focusNode: focusNode,
+                              enabled: controller.isOnline.value,
+                              decoration: InputDecoration(
+                                hintText: controller.isOnline.value ? 'Type a message' : 'Offline: Cannot send messages',
+                                hintStyle: GoogleFonts.poppins(color: Colors.grey[600], fontSize: isTablet ? 15.sp : 13.sp),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(horizontal: paddingHorizontal + 10.w, vertical: paddingVertical + 6.h),
+                              ),
+                              style: GoogleFonts.poppins(fontSize: isTablet ? 15.sp : 13.sp),
+                              minLines: 1,
+                              maxLines: 4,
+                              onChanged: (text) => controller.isOnline.value ? controller.handleTypingStatus(text, focusNode.hasFocus) : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: paddingHorizontal),
+                      CircleAvatar(
+                        radius: isSmallScreen ? 22.r : isTablet ? 26.r : 24.r,
+                        backgroundColor: controller.isSending.value || !controller.isOnline.value
+                            ? Colors.grey[400]
+                            : const Color(0xFF075E54),
+                        child: IconButton(
+                          icon: Icon(Icons.send, color: Colors.white, size: isTablet ? 16.w : 14.w),
+                          onPressed: controller.isSending.value || !controller.isOnline.value
+                              ? null
+                              : () {
+                                  if (msgController.text.trim().isNotEmpty) {
+                                    controller.sendMessage(msgController.text);
+                                    msgController.clear();
+                                    _scrollToBottom();
+                                  }
+                                },
+                          tooltip: 'Send',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

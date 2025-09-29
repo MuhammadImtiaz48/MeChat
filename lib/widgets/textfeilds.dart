@@ -36,13 +36,13 @@ class Textfeilds extends StatelessWidget {
         hintText: hint,
         labelText: text,
         prefixIcon: icon,
-        errorStyle: TextStyle(color: Colors.red),
+        errorStyle: const TextStyle(color: Colors.red),
         focusedBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: Colors.red, width: 2),
+          borderSide: const BorderSide(color: Colors.red, width: 2),
           borderRadius: BorderRadius.circular(11),
         ),
         enabledBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: Color.fromARGB(255, 2, 0, 0), width: 2),
+          borderSide: const BorderSide(color: Color.fromARGB(255, 2, 0, 0), width: 2),
           borderRadius: BorderRadius.circular(11),
         ),
       ),

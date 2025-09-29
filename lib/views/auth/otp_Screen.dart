@@ -21,7 +21,7 @@ class _OtpScreenState extends State<OtpScreen> {
 
     if (otp.length != 6) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Please enter a 6-digit OTP")),
+        const SnackBar(content: Text("Please enter a 6-digit OTP")),
       );
       return;
     }
@@ -60,9 +60,9 @@ class _OtpScreenState extends State<OtpScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text("Enter OTP ",style: TextStyle(fontSize: 25,fontWeight: FontWeight.w500),),
-            SizedBox(height: 20,),
-            Icon(Icons.message,size: 100,color: Colors.blue,),
+            const Text("Enter OTP ",style: TextStyle(fontSize: 25,fontWeight: FontWeight.w500),),
+            const SizedBox(height: 20,),
+            const Icon(Icons.message,size: 100,color: Colors.blue,),
             const Text(
               "Enter the 6-digit code sent to your phone",
               style: TextStyle(fontSize: 18),
@@ -72,7 +72,7 @@ class _OtpScreenState extends State<OtpScreen> {
               maxlength: 6,
               controll: otpController,
               text: "OTP Code",
-              keyboardType: TextInputType.numberWithOptions(),
+              keyboardType: const TextInputType.numberWithOptions(),
               ),
             // TextField(
             //   controller: otpController,
@@ -83,7 +83,7 @@ class _OtpScreenState extends State<OtpScreen> {
             //     labelText: "OTP Code",
             //   ),
             // ),
-             SizedBox(height: 30),
+             const SizedBox(height: 30),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -92,8 +92,8 @@ class _OtpScreenState extends State<OtpScreen> {
                 ),
                 onPressed: isLoading ? null : _verifyOtp,
                 child: isLoading
-                    ? CircularProgressIndicator(color: Colors.white)
-                    : Text("Verify OTP",style: TextStyle(color: Colors.white),),
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text("Verify OTP",style: TextStyle(color: Colors.white),),
               ),
             )
           ],

@@ -18,19 +18,19 @@ class _MassageState extends State<Massage> {
     Timer(const Duration(seconds: 4), () {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) =>  LoginScreen()),
+        MaterialPageRoute(builder: (context) =>  const LoginScreen()),
       );
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return const Scaffold(
       backgroundColor: Colors.white, // Optional: Add your desired background
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
+          children: [
             Icon(Icons.message, size: 80, color: Colors.blue), // Optional Icon
             SizedBox(height: 20),
             Text(

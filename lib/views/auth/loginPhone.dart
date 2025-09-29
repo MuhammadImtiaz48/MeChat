@@ -15,23 +15,31 @@ class Loginphone extends StatefulWidget {
 class _LoginphoneState extends State<Loginphone> {
   String? fullPhoneNumber;
   final phoneNumberController = TextEditingController();
-  final auth = FirebaseAuth.instance;
+  final FirebaseAuth auth = FirebaseAuth.instance;
+
+  @override
+  void dispose() {
+    phoneNumberController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        padding: EdgeInsets.symmetric(horizontal: 24),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const SizedBox(height: 120),
-            const Icon(Icons.phone_android, size: 150, color: Colors.blue),
+            const Icon(Icons.phone_android, size: 120, color: Colors.blue),
             const SizedBox(height: 20),
             const Text(
-              "Login with phone Number",
-              style: TextStyle(fontSize: 25, fontWeight: FontWeight.w500),
+              "Login with Phone Number",
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 30),
+
+            /// Phone field
             IntlPhoneField(
               controller: phoneNumberController,
               decoration: const InputDecoration(
@@ -42,33 +50,46 @@ class _LoginphoneState extends State<Loginphone> {
               ),
               initialCountryCode: 'PK',
               onChanged: (phone) {
-                setState(() {
-                  fullPhoneNumber = phone.completeNumber;
-                });
-                print('Complete Phone Number: ${phone.completeNumber}');
+                fullPhoneNumber = phone.completeNumber;
               },
             ),
+
             const SizedBox(height: 40),
+
+            /// Verify Button
             SizedBox(
               width: 300,
               child: Buttens(
                 bgcolor: Colors.black,
                 btname: "Verify",
-                textStyle: const TextStyle(fontSize: 20, color: Colors.white),
+                textStyle: const TextStyle(fontSize: 18, color: Colors.white),
                 callBack: () {
-                  if (fullPhoneNumber == null) {
+                  if (fullPhoneNumber == null ||
+                      fullPhoneNumber!.trim().isEmpty) {
                     Utils().toastMessage("Please enter a valid phone number");
                     return;
                   }
 
                   auth.verifyPhoneNumber(
                     phoneNumber: fullPhoneNumber!,
-                    verificationCompleted: (PhoneAuthCredential credential) {
-                      // Auto verification (Android only)
+                    timeout: const Duration(seconds: 60),
+
+                    /// Auto verification (Android only)
+                    verificationCompleted: (PhoneAuthCredential credential) async {
+                      try {
+                        await auth.signInWithCredential(credential);
+                        Utils().toastMessage("Phone number verified automatically!");
+                      } catch (e) {
+                        Utils().toastMessage("Auto login failed: $e");
+                      }
                     },
+
+                    /// If failed
                     verificationFailed: (FirebaseAuthException e) {
                       Utils().toastMessage(e.message ?? "Verification failed");
                     },
+
+                    /// Code sent
                     codeSent: (String verificationId, int? resendToken) {
                       Navigator.push(
                         context,
@@ -78,13 +99,15 @@ class _LoginphoneState extends State<Loginphone> {
                         ),
                       );
                     },
+
+                    /// Timeout
                     codeAutoRetrievalTimeout: (String verificationId) {
-                      Utils().toastMessage("Timeout. Try again.");
+                      Utils().toastMessage("Timeout. Please try again.");
                     },
                   );
                 },
               ),
-            )
+            ),
           ],
         ),
       ),

@@ -1,159 +1,239 @@
-// main.dart
+import 'dart:async';
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-
+import 'package:get/get.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:imtiaz/controllers/app_controller.dart';
+import 'package:imtiaz/firebase_Services/firebase_options.dart';
+import 'package:imtiaz/firebase_Services/notification_services.dart';
+import 'package:imtiaz/models/userchat.dart';
 import 'package:imtiaz/views/auth/Signup.dart';
 import 'package:imtiaz/views/auth/login.dart';
 import 'package:imtiaz/views/auth/loginPhone.dart';
-import 'package:imtiaz/firebase_Services/firebase_options.dart';
+import 'package:imtiaz/views/ui_screens/chat_screen.dart';
+import 'package:imtiaz/views/ui_screens/chat_screenAi.dart';
 import 'package:imtiaz/views/ui_screens/home.dart';
 import 'package:imtiaz/views/ui_screens/splash.dart';
-import 'package:imtiaz/widgets/buttens.dart';
-
-// ✅ Zego imports
+import 'package:imtiaz/views/ui_screens/user_profile.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
 
-// ✅ Global objects
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// ✅ Zego credentials
-const int zegoAppID = 116174848;
-const String zegoAppSign =
-    '07f8d98822d54bc39ffc058f2c0a2b638930ba0c37156225bac798ae0f90f679';
-
-// 🔔 Background FCM handler
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  debugPrint("📩 Background Message: ${message.messageId}");
-}
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    final data = message.data;
+    final type = data['type'] ?? 'message';
+    final chatId = data['chatId'] ?? '';
+    final callId = data['callId'] ?? '';
 
-// 🔔 Show local notification
-Future<void> _showLocalNotification(String title, String body) async {
-  const androidDetails = AndroidNotificationDetails(
-    'mechat_channel_id',
-    'MeChat Notifications',
-    channelDescription: 'MeChat local notifications',
-    importance: Importance.max,
-    priority: Priority.high,
-    playSound: true,
-  );
-  const notificationDetails = NotificationDetails(android: androidDetails);
-
-  await flutterLocalNotificationsPlugin.show(
-    DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    title,
-    body,
-    notificationDetails,
-  );
+    await NotificationService.showLocalNotification(
+      id: type == 'call' ? callId.hashCode : chatId.hashCode,
+      title: message.notification?.title ?? (type == 'call' ? 'Incoming Call' : 'New Message'),
+      body: message.notification?.body ?? '',
+      payload: jsonEncode(data), // Ensure payload is a JSON string
+      type: type,
+      chatId: chatId,
+    );
+    debugPrint('✅ Background notification handled: type=$type, chatId=$chatId');
+  } catch (e) {
+    debugPrint('❌ Background FCM handler error: $e');
+  }
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // ✅ Local notifications init
-  await _initializeLocalNotification();
+  try {
+    await _initializeFirebase();
 
-  // ✅ FCM background handler
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+    );
 
-  // ✅ Foreground notifications
-  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    debugPrint("📩 Foreground Message: ${message.notification?.title}");
-    if (message.notification != null) {
-      _showLocalNotification(
-        message.notification!.title ?? "New Message",
-        message.notification!.body ?? "You got a message",
-      );
+    await FirebaseMessaging.instance.requestPermission().timeout(const Duration(seconds: 3));
+
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    final appController = Get.put(AppController(), permanent: true);
+
+    await NotificationService.init(
+      onNotificationTap: appController.handleNotificationTap,
+    ).timeout(const Duration(seconds: 3), onTimeout: () {
+      debugPrint('⚠️ NotificationService initialization timed out');
+    });
+
+    try {
+      ZegoUIKitPrebuiltCallInvitationService().useSystemCallingUI([ZegoUIKitSignalingPlugin()]);
+      ZegoUIKitPrebuiltCallInvitationService().setNavigatorKey(navigatorKey);
+      debugPrint('✅ Zego UIKit initialized successfully');
+    } catch (e) {
+      debugPrint('❌ Zego UIKit initialization error: $e');
     }
-  });
-
-  // ✅ Notification tap (when app is opened by tapping notification)
-  FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-    debugPrint("🔔 Notification tapped: ${message.data}");
-    final receiverId = message.data['senderId'];
-    if (receiverId != null && navigatorKey.currentContext != null) {
-      Navigator.pushNamed(navigatorKey.currentContext!, '/chat',
-          arguments: receiverId);
-    }
-  });
-
-  // ✅ Setup Zego
-  ZegoUIKitPrebuiltCallInvitationService().useSystemCallingUI(
-    [ZegoUIKitSignalingPlugin()],
-  );
-  ZegoUIKitPrebuiltCallInvitationService().setNavigatorKey(navigatorKey);
-
-  final currentUser = FirebaseAuth.instance.currentUser;
-  if (currentUser != null) {
-    await _initZego(currentUser);
+  } catch (e) {
+    debugPrint('❌ Main initialization error: $e');
+    Get.snackbar(
+      'Error',
+      'Failed to initialize app: ${e.toString().split('.').first}',
+      backgroundColor: Colors.red.shade600,
+      colorText: Colors.white,
+      snackPosition: SnackPosition.BOTTOM,
+      borderRadius: 10.r,
+      margin: EdgeInsets.all(16.w),
+      duration: const Duration(seconds: 4),
+      isDismissible: true,
+      titleText: Text(
+        'Error',
+        style: GoogleFonts.poppins(
+          fontSize: 16.sp,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      ),
+      messageText: Text(
+        'Failed to initialize app: ${e.toString().split('.').first}',
+        style: GoogleFonts.poppins(
+          fontSize: 14.sp,
+          color: Colors.white,
+        ),
+      ),
+      mainButton: TextButton(
+        onPressed: () => Get.back(),
+        child: Text(
+          'Dismiss',
+          style: GoogleFonts.poppins(
+            fontSize: 14.sp,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
   }
 
   runApp(const MyApp());
 }
 
-Future<void> _initializeLocalNotification() async {
-  const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-  const initSettings = InitializationSettings(android: androidSettings);
-
-  const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'mechat_channel_id',
-    'MeChat Notifications',
-    description: 'MeChat local notifications',
-    importance: Importance.max,
-  );
-
-  await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(channel);
-
-  await flutterLocalNotificationsPlugin.initialize(
-    initSettings,
-    onDidReceiveNotificationResponse: (response) {
-      debugPrint("🔔 Local Notification tapped: ${response.payload}");
-    },
-  );
-}
-
-Future<void> _initZego(User user) async {
-  await ZegoUIKitPrebuiltCallInvitationService().init(
-    appID: zegoAppID,
-    appSign: zegoAppSign,
-    userID: user.uid,
-    userName: user.displayName ?? user.email ?? "User-${user.uid.substring(0, 6)}",
-    plugins: [ZegoUIKitSignalingPlugin()],
-  );
+Future<void> _initializeFirebase() async {
+  for (int i = 0; i < 3; i++) {
+    try {
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+          .timeout(const Duration(seconds: 5));
+      debugPrint('✅ Firebase initialized successfully');
+      return;
+    } catch (e) {
+      if (i == 2) {
+        debugPrint('❌ Firebase initialization failed after retries: $e');
+        throw Exception('Failed to initialize Firebase');
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+  }
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return ScreenUtilInit(
-      designSize: const Size(375, 812),
+      designSize: const Size(360, 690),
       minTextAdapt: true,
       splitScreenMode: true,
-      builder: (_, __) => MaterialApp(
+      builder: (context, child) => GetMaterialApp(
         debugShowCheckedModeBanner: false,
         navigatorKey: navigatorKey,
-        home: const Splash(),
+        title: 'MeChat',
+        theme: ThemeData(
+          primaryColor: const Color(0xFF075E54),
+          colorScheme: ColorScheme.fromSwatch().copyWith(
+            secondary: const Color(0xFF25D366),
+          ),
+          scaffoldBackgroundColor: Colors.white,
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF075E54),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+              padding: EdgeInsets.symmetric(horizontal: 40.w, vertical: 16.h),
+            ),
+          ),
+          textTheme: TextTheme(
+            bodyMedium: GoogleFonts.poppins(fontSize: 16.sp, color: Colors.black87),
+            titleLarge: GoogleFonts.poppins(fontSize: 28.sp, fontWeight: FontWeight.bold, color: const Color(0xFF075E54)),
+            bodySmall: GoogleFonts.poppins(fontSize: 14.sp, color: Colors.grey[600]),
+          ),
+        ),
+        initialRoute: '/splash',
+        getPages: [
+          GetPage(name: '/splash', page: () => const SplashScreen()),
+          GetPage(name: '/dashboard', page: () => const Dashboard()),
+          GetPage(name: '/login', page: () => const LoginScreen()),
+          GetPage(name: '/signup', page: () => const SignupScreen()),
+          GetPage(name: '/phone_login', page: () => const Loginphone()),
+          GetPage(
+            name: '/home',
+            page: () {
+              final controller = Get.find<AppController>();
+              return HomeScreen(userName: controller.cachedUserData['name']?.toString().trim() ?? 'Guest');
+            },
+          ),
+          GetPage(name: '/gemini_chat', page: () => const GeminiChatScreen()),
+          GetPage(
+            name: '/chat',
+            page: () {
+              final args = Get.arguments as Map<String, dynamic>?;
+              final user = args?['user'] as UserchatModel? ??
+                  UserchatModel(
+                    uid: '',
+                    name: 'Guest',
+                    email: '',
+                    image: '',
+                    fcmToken: '',
+                    profilePic: '',
+                    lastActive: null,
+                  );
+              final loggedInUserName = args?['loggedInUserName']?.toString().trim() ?? 'Guest';
+              return ChatScreen(
+                user: user,
+                loggedInUserName: loggedInUserName,
+              );
+            },
+          ),
+          GetPage(
+            name: '/UserProfile',
+            page: () {
+              final args = Get.arguments as Map<String, dynamic>?;
+              final user = args?['user'] as UserchatModel? ??
+                  UserchatModel(
+                    uid: '',
+                    name: 'Guest',
+                    email: '',
+                    image: '',
+                    fcmToken: '',
+                    profilePic: '',
+                    lastActive: null,
+                  );
+              final userId = args?['userId']?.toString() ?? '';
+              final userName = args?['userName']?.toString().trim() ?? 'Guest';
+              return UserProfileScreen(
+                userId: userId,
+                userName: userName,
+                user: user,
+              );
+            },
+          ),
+        ],
       ),
     );
   }
 }
-
-// ✅ Dashboard UI
-
 
 class Dashboard extends StatelessWidget {
   const Dashboard({super.key});
@@ -161,638 +241,207 @@ class Dashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Colors.black, Color(0xFF010147), Color(0xFF011220)],
-          ),
-        ),
+      body: SafeArea(
         child: SingleChildScrollView(
-          child: Column(
-            children: [
-              SizedBox(height: MediaQuery.of(context).padding.top + 40),
-              // Animated Logo and Title
-              _AnimatedLogoTitle(),
-              SizedBox(height: 20),
-              // Animated Headlines
-              _AnimatedHeadlines(),
-              SizedBox(height: 15),
-              // Description Text
-              _DescriptionText(),
-              SizedBox(height: 30),
-              // Social Login Buttons
-              _SocialLoginButtons(context),
-              SizedBox(height: 15),
-              // Or Divider
-              _OrDivider(),
-              SizedBox(height: 20),
-              // Sign Up Button
-              _SignUpButton(context),
-              SizedBox(height: 20),
-              // Login Link
-              _LoginLink(context),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AnimatedLogoTitle extends StatefulWidget {
-  @override
-  __AnimatedLogoTitleState createState() => __AnimatedLogoTitleState();
-}
-
-class __AnimatedLogoTitleState extends State<_AnimatedLogoTitle>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _opacityAnimation;
-  late Animation<double> _scaleAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    
-    _controller = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1200),
-    );
-    
-    _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Interval(0.0, 0.6, curve: Curves.easeInOut),
-      ),
-    );
-    
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Interval(0.3, 1.0, curve: Curves.elasticOut),
-      ),
-    );
-    
-    _controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _scaleAnimation,
-      child: FadeTransition(
-        opacity: _opacityAnimation,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Animated logo with pulsing effect
-            _PulsingLogo(),
-            SizedBox(width: 20),
-            Text(
-              "MeChat",
-              style: TextStyle(
-                fontSize: 24,
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                shadows: [
-                  Shadow(
-                    blurRadius: 10.0,
-                    color: Colors.blueAccent,
-                    offset: Offset(0, 0),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 40.h),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                AnimatedOpacity(
+                  opacity: 1.0,
+                  duration: const Duration(milliseconds: 1000),
+                  child: Icon(Icons.message, size: 80.sp, color: const Color(0xFF075E54)),
+                ),
+                SizedBox(height: 16.h),
+                AnimatedOpacity(
+                  opacity: 1.0,
+                  duration: const Duration(milliseconds: 1200),
+                  child: Text('MeChat', style: Theme.of(context).textTheme.titleLarge),
+                ),
+                SizedBox(height: 32.h),
+                AnimatedOpacity(
+                  opacity: 1.0,
+                  duration: const Duration(milliseconds: 1400),
+                  child: Text(
+                    'Connect with friends easily & quickly',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(fontSize: 20.sp, fontWeight: FontWeight.w400),
                   ),
-                ],
-              ),
+                ),
+                SizedBox(height: 16.h),
+                AnimatedOpacity(
+                  opacity: 1.0,
+                  duration: const Duration(milliseconds: 1600),
+                  child: Text(
+                    'Talk freely. Share instantly.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      fontSize: 16.sp,
+                      color: Colors.grey[600],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+                SizedBox(height: 40.h),
+                const _SocialLoginButtons(),
+                SizedBox(height: 24.h),
+                const _OrDivider(),
+                SizedBox(height: 24.h),
+                const _SignUpButton(),
+                SizedBox(height: 16.h),
+                const _LoginLink(),
+              ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PulsingLogo extends StatefulWidget {
-  @override
-  __PulsingLogoState createState() => __PulsingLogoState();
-}
-
-class __PulsingLogoState extends State<_PulsingLogo>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _pulseController;
-  late Animation<double> _pulseAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1500),
-    )..repeat(reverse: true);
-    
-    _pulseAnimation = Tween<double>(begin: 0.9, end: 1.1).animate(
-      CurvedAnimation(
-        parent: _pulseController,
-        curve: Curves.easeInOut,
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _pulseController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _pulseAnimation,
-      child: Container(
-        padding: EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.blueAccent,
-              Colors.purpleAccent,
-            ],
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.blueAccent.withOpacity(0.5),
-              blurRadius: 10,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: Icon(
-          Icons.chat_bubble_outlined,
-          color: Colors.white,
-          size: 30,
         ),
       ),
     );
   }
 }
 
-class _AnimatedHeadlines extends StatefulWidget {
-  @override
-  __AnimatedHeadlinesState createState() => __AnimatedHeadlinesState();
-}
-
-class __AnimatedHeadlinesState extends State<_AnimatedHeadlines>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<Offset> _slideAnimation1;
-  late Animation<Offset> _slideAnimation2;
-  late Animation<double> _opacityAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    
-    _controller = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1000),
-    );
-    
-    _slideAnimation1 = Tween<Offset>(
-      begin: Offset(-1, 0),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Interval(0.0, 0.5, curve: Curves.easeOut),
-      ),
-    );
-    
-    _slideAnimation2 = Tween<Offset>(
-      begin: Offset(1, 0),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Interval(0.5, 1.0, curve: Curves.easeOut),
-      ),
-    );
-    
-    _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeIn,
-      ),
-    );
-    
-    _controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+class _SocialLoginButtons extends StatelessWidget {
+  const _SocialLoginButtons();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 20),
-      child: Column(
-        children: [
-          SlideTransition(
-            position: _slideAnimation1,
-            child: FadeTransition(
-              opacity: _opacityAnimation,
-              child: Text(
-                "Connect\nfriends",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white, 
-                  fontSize: 42,
-                  fontWeight: FontWeight.w300,
-                  height: 1.2,
+    final controller = Get.find<AppController>();
+    return Obx(() => Stack(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _SocialButton(
+                  icon: Image.asset('assets/images/facebook.png', width: 24.w),
+                  onPressed: () {
+                    controller.errorMessage.value = 'Facebook login not implemented';
+                    controller.showSnackBar('Error', controller.errorMessage.value, Colors.red.shade600);
+                  },
+                ),
+                SizedBox(width: 16.w),
+                _SocialButton(
+                  icon: Image.asset('assets/images/google.png', width: 24.w),
+                  onPressed: controller.isLoading.value ? null : controller.loginWithGoogle,
+                ),
+                SizedBox(width: 16.w),
+                _SocialButton(
+                  icon: Icon(Icons.phone, color: const Color(0xFF075E54), size: 24.sp),
+                  onPressed: () => Get.toNamed('/phone_login'),
+                ),
+              ],
+            ),
+            if (controller.isLoading.value)
+              Container(
+                color: Colors.black.withOpacity(0.5),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: const Color(0xFF075E54),
+                    strokeWidth: MediaQuery.of(context).size.width >= 600 ? 5.w : 4.w,
+                  ),
                 ),
               ),
-            ),
-          ),
-          SizedBox(height: 10),
-          SlideTransition(
-            position: _slideAnimation2,
-            child: FadeTransition(
-              opacity: _opacityAnimation,
-              child: Text(
-                "easily & \n quickly",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                  fontSize: 40,
-                  height: 1.2,
-                  shadows: [
-                    Shadow(
-                      blurRadius: 10.0,
-                      color: Colors.blueAccent.withOpacity(0.5),
-                      offset: Offset(0, 0),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DescriptionText extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      duration: Duration(milliseconds: 800),
-      tween: Tween<double>(begin: 0.0, end: 1.0),
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, 20 * (1 - value)),
-            child: child,
-          ),
-        );
-      },
-      child: Text(
-        "Talk freely. Share instantly.\nWelcome to MeChat — your world, connected.",
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontStyle: FontStyle.italic,
-          fontSize: 16,
-          color: Colors.white.withOpacity(0.8),
-        ),
-      ),
-    );
-  }
-}
-
-class _SocialLoginButtons extends StatefulWidget {
-  final BuildContext context;
-  
-  _SocialLoginButtons(this.context);
-  
-  @override
-  __SocialLoginButtonsState createState() => __SocialLoginButtonsState();
-}
-
-class __SocialLoginButtonsState extends State<_SocialLoginButtons>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late List<Animation<double>> _animations;
-
-  @override
-  void initState() {
-    super.initState();
-    
-    _controller = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 800),
-    );
-    
-    _animations = List.generate(3, (index) {
-      return Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-          parent: _controller,
-          curve: Interval(0.2 * index, 0.2 * index + 0.6, curve: Curves.elasticOut),
-        ),
-      );
-    });
-    
-    _controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(30),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Facebook Button
-          ScaleTransition(
-            scale: _animations[0],
-            child: _SocialButton(
-              icon: Image.asset('assets/images/facebook.png'),
-              onPressed: () {
-                // TODO: Facebook login
-              },
-            ),
-          ),
-          SizedBox(width: 20),
-          // Google Button
-          ScaleTransition(
-            scale: _animations[1],
-            child: _SocialButton(
-              icon: Image.asset('assets/images/google.png'),
-              onPressed: () async {
-                bool isLoggedIn = await loginWithGoogle();
-                if (isLoggedIn) {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const HomeScreen()),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text("Login failed!"),
-                      backgroundColor: Colors.redAccent,
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  );
-                }
-              },
-            ),
-          ),
-          SizedBox(width: 20),
-          // Phone Button
-          ScaleTransition(
-            scale: _animations[2],
-            child: _SocialButton(
-              icon: Icon(Icons.phone, color: Colors.blue),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const Loginphone()),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ));
   }
 }
 
 class _SocialButton extends StatelessWidget {
   final Widget icon;
-  final VoidCallback onPressed;
-  
-  const _SocialButton({required this.icon, required this.onPressed});
-  
+  final VoidCallback? onPressed;
+
+  const _SocialButton({required this.icon, this.onPressed});
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 60,
-      height: 60,
+      width: 56.w,
+      height: 56.h,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Colors.grey[100],
         shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: Colors.grey[300]!, width: 1.w),
       ),
       child: IconButton(
         icon: icon,
-        iconSize: 30,
         onPressed: onPressed,
+        splashRadius: 28.w,
       ),
     );
   }
 }
 
 class _OrDivider extends StatelessWidget {
+  const _OrDivider();
+
   @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      duration: Duration(milliseconds: 500),
-      tween: Tween<double>(begin: 0.0, end: 1.0),
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: child,
-        );
-      },
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Divider(
-              color: Colors.white.withOpacity(0.3),
-              thickness: 1,
-              indent: 40,
-              endIndent: 10,
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Divider(color: Colors.grey[400], thickness: 1.w, indent: 40.w, endIndent: 10.w),
+        ),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10.w),
+          child: Text(
+            'OR',
+            style: GoogleFonts.poppins(
+              color: Colors.grey[600],
+              fontSize: 14.sp,
+              fontWeight: FontWeight.w500,
             ),
           ),
-          Text(
-            "OR",
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
-              fontSize: 14,
-            ),
-          ),
-          Expanded(
-            child: Divider(
-              color: Colors.white.withOpacity(0.3),
-              thickness: 1,
-              indent: 10,
-              endIndent: 40,
-            ),
-          ),
-        ],
-      ),
+        ),
+        Expanded(
+          child: Divider(color: Colors.grey[400], thickness: 1.w, indent: 10.w, endIndent: 40.w),
+        ),
+      ],
     );
   }
 }
 
 class _SignUpButton extends StatelessWidget {
-  final BuildContext context;
-  
-  _SignUpButton(this.context);
-  
+  const _SignUpButton();
+
   @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      duration: Duration(milliseconds: 600),
-      tween: Tween<double>(begin: 0.0, end: 1.0),
-      builder: (context, value, child) {
-        return Transform.translate(
-          offset: Offset(0, 20 * (1 - value)),
-          child: Opacity(
-            opacity: value,
-            child: child,
-          ),
-        );
-      },
-      child: ElevatedButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const Signup()),
-          );
-        },
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
-          padding: EdgeInsets.symmetric(horizontal: 40, vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30),
-          ),
-          elevation: 5,
-          shadowColor: Colors.black.withOpacity(0.3),
-        ),
-        child: Text(
-          "Sign up with email",
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+    return ElevatedButton(
+      onPressed: () => Get.toNamed('/signup'),
+      child: Text(
+        'Sign up with email',
+        style: GoogleFonts.poppins(fontSize: 16.sp, fontWeight: FontWeight.w600),
       ),
     );
   }
 }
 
 class _LoginLink extends StatelessWidget {
-  final BuildContext context;
-  
-  _LoginLink(this.context);
-  
+  const _LoginLink();
+
   @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      duration: Duration(milliseconds: 700),
-      tween: Tween<double>(begin: 0.0, end: 1.0),
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: child,
-        );
-      },
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            "Existing account?",
-            style: TextStyle(color: Colors.white, fontSize: 14),
-          ),
-          SizedBox(width: 10),
-          InkWell(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-              );
-            },
-            child: Text(
-              "Login",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                fontSize: 16,
-                decoration: TextDecoration.underline,
-              ),
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          'Existing account?',
+          style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 14.sp),
+        ),
+        SizedBox(width: 8.w),
+        GestureDetector(
+          onTap: () => Get.toNamed('/login'),
+          child: Text(
+            'Login',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF075E54),
+              fontSize: 16.sp,
+              decoration: TextDecoration.underline,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
-  }
-}
-
-Future<bool> loginWithGoogle() async {
-  try {
-    final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
-    if (googleUser == null) return false;
-
-    final GoogleSignInAuthentication googleAuth =
-        await googleUser.authentication;
-
-    final credential = GoogleAuthProvider.credential(
-      idToken: googleAuth.idToken,
-      accessToken: googleAuth.accessToken,
-    );
-
-    final userCredential =
-        await FirebaseAuth.instance.signInWithCredential(credential);
-    final user = userCredential.user;
-
-    if (user != null) {
-      final fcmToken = await FirebaseMessaging.instance.getToken();
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'uid': user.uid,
-        'name': user.displayName ?? '',
-        'email': user.email ?? '',
-        'image': user.photoURL ?? '',
-        'fcmToken': fcmToken,
-        'lastActive': DateTime.now(),
-      }, SetOptions(merge: true));
-
-      return true;
-    }
-    return false;
-  } catch (e) {
-    debugPrint("Login Error: $e");
-    return false;
   }
 }
