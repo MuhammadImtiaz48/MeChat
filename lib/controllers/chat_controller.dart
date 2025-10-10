@@ -6,12 +6,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:imtiaz/models/userchat.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:imtiaz/controllers/app_controller.dart';
 import 'package:imtiaz/firebase_Services/notification_services.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:imtiaz/models/userchat.dart';
 
 class ChatController extends GetxController {
   final UserchatModel user;
@@ -39,7 +39,7 @@ class ChatController extends GetxController {
 
   String _generateChatRoomId(String uid1, String uid2) {
     final ids = [uid1, uid2]..sort();
-    return '${ids[0]}-${ids[1]}'; // Consistent with HomeScreen
+    return '${ids[0]}-${ids[1]}';
   }
 
   String _formatLastSeen(Timestamp? lastActive) {
@@ -178,11 +178,21 @@ class ChatController extends GetxController {
 
   Future<void> cacheMessages(List<Map<String, dynamic>> messages) async {
     try {
+      final jsonMessages = messages.map((msg) {
+        return {
+          ...msg,
+          'timestamp': msg['timestamp'] is Timestamp
+              ? (msg['timestamp'] as Timestamp).toDate().toIso8601String()
+              : msg['timestamp'] is DateTime
+                  ? (msg['timestamp'] as DateTime).toIso8601String()
+                  : msg['timestamp']?.toString() ?? DateTime.now().toIso8601String(),
+        };
+      }).toList();
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('messages_$chatRoomId', jsonEncode(messages));
-      cachedMessages.assignAll(messages);
+      await prefs.setString('messages_$chatRoomId', jsonEncode(jsonMessages));
+      cachedMessages.assignAll(jsonMessages);
       if (kDebugMode) {
-        debugPrint('✅ ChatController: Cached ${messages.length} messages for $chatRoomId');
+        debugPrint('✅ ChatController: Cached ${jsonMessages.length} messages for $chatRoomId');
       }
     } catch (e) {
       if (kDebugMode) {
@@ -203,7 +213,7 @@ class ChatController extends GetxController {
           final fcmToken = userDoc.data()!['fcmToken']?.toString();
           if (fcmToken != null && fcmToken.isNotEmpty) {
             if (kDebugMode) {
-              debugPrint('✅ ChatController: Retrieved receiver FCM token: $fcmToken for user=${user.uid}');
+              debugPrint('✅ ChatController: Retrieved receiver FCM token for user=${user.uid}');
             }
             return fcmToken;
           }
@@ -267,7 +277,7 @@ class ChatController extends GetxController {
             'seen': false,
           };
           if (kDebugMode) {
-            debugPrint('ChatController: Sending message: $msgData to user=${user.uid}');
+            debugPrint('ChatController: Sending message to Firestore: $msgData');
           }
           await FirebaseFirestore.instance
               .collection('chats')
@@ -295,7 +305,6 @@ class ChatController extends GetxController {
           cachedMessages.insert(0, cachedMsg);
           await cacheMessages(cachedMessages.toList());
 
-          // Send notification to receiver
           if (receiverFcmToken != null) {
             final success = await NotificationService.sendPushNotification(
               targetToken: receiverFcmToken,
@@ -306,48 +315,30 @@ class ChatController extends GetxController {
                 'chatId': user.uid,
                 'senderId': currentUser.uid,
                 'senderName': myName.value.isNotEmpty ? myName.value : 'User',
-              }, type: '', senderId: '', senderName: '', chatId: '', callId: '', callType: '', data: {},
+              }, type: '', senderId: '', chatId: '', senderName: '', callType: '', callId: '', data: {},
             );
             if (success) {
               if (kDebugMode) {
-                debugPrint('✅ ChatController: Sent notification to receiver=${user.uid}, token=$receiverFcmToken');
+                debugPrint('✅ ChatController: Sent message notification to receiver=${user.uid}');
               }
             } else {
               if (kDebugMode) {
-                debugPrint('⚠️ ChatController: Failed to send notification to receiver=${user.uid}');
+                debugPrint('⚠️ ChatController: Failed to send message notification to receiver=${user.uid}');
               }
             }
           } else {
             if (kDebugMode) {
-              debugPrint('⚠️ ChatController: No FCM token for receiver=${user.uid}, notification skipped');
+              debugPrint('⚠️ ChatController: No FCM token for receiver=${user.uid}, message notification skipped');
             }
           }
 
-          Get.snackbar(
-            'Success',
-            'Message sent',
-            backgroundColor: Colors.green,
-            colorText: Colors.white,
-            snackPosition: SnackPosition.TOP,
-            borderRadius: 10.r,
-            margin: EdgeInsets.all(16.w),
-            duration: const Duration(seconds: 2),
-            titleText: Text(
-              'Success',
-              style: GoogleFonts.poppins(fontSize: 16.sp, fontWeight: FontWeight.w600, color: Colors.white),
-            ),
-            messageText: Text(
-              'Message sent',
-              style: GoogleFonts.poppins(fontSize: 14.sp, color: Colors.white),
-            ),
-          );
           return;
         } catch (e) {
           if (kDebugMode) {
             debugPrint('❌ ChatController: Error sending message (attempt ${i + 1}): $e');
           }
           if (i == 2) {
-            throw e;
+            rethrow;
           }
           await Future.delayed(const Duration(seconds: 2));
         }
@@ -541,7 +532,6 @@ class ChatController extends GetxController {
         if (kDebugMode) {
           debugPrint('ChatController: Starting ${isVideo ? 'video' : 'voice'} call with ${user.uid}');
         }
-        // Send call notification to receiver
         if (receiverFcmToken != null) {
           final success = await NotificationService.sendPushNotification(
             targetToken: receiverFcmToken,
@@ -554,11 +544,11 @@ class ChatController extends GetxController {
               'senderName': myName.value.isNotEmpty ? myName.value : 'User',
               'callId': chatRoomId,
               'callType': isVideo ? 'video' : 'voice',
-            }, type: '', senderId: '', senderName: '', chatId: '', callId: '', callType: '', data: {},
+            }, type: '', senderId: '', chatId: '', senderName: '', callType: '', callId: '', data: {},
           );
           if (success) {
             if (kDebugMode) {
-              debugPrint('✅ ChatController: Sent call notification to receiver=${user.uid}, token=$receiverFcmToken');
+              debugPrint('✅ ChatController: Sent call notification to receiver=${user.uid}');
             }
           } else {
             if (kDebugMode) {

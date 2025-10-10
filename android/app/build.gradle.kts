@@ -1,54 +1,52 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
-    // Flutter Gradle plugin
-    id("dev.flutter.flutter-gradle-plugin")
+    id("org.jetbrains.kotlin.android")
+    id("com.google.gms.google-services") // Firebase
+    id("dev.flutter.flutter-gradle-plugin") // Flutter
 }
 
 android {
-    namespace = "com.example.imtiaz" 
-    compileSdk = 36   // ✅ Safe for TECNO device and Zego
+    namespace = "com.example.imtiaz"
+    compileSdk = 35
 
-    ndkVersion = flutter.ndkVersion
+    defaultConfig {
+        applicationId = "com.example.imtiaz"
+        minSdk = flutter.minSdkVersion
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0.0"
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17 // ⬅️ changed from 11 to 17
         targetCompatibility = JavaVersion.VERSION_17
-        // ✅ Kotlin DSL property assignment
         isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "17" // ⬅️ changed from 11 to 17
     }
+}
 
-    defaultConfig {
-        applicationId = "com.example.flutter_application_1"
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+}
 
-        minSdk = flutter.minSdkVersion
-        targetSdk = 34   // ✅ better to match compileSdk
-
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
-
-        // ✅ Kotlin DSL, not Groovy
-        multiDexEnabled = true
-    }
-
-    buildTypes {
-        release {
-            signingConfig = signingConfigs.getByName("debug")
-        }
-    }
+kotlin {
+    jvmToolchain(17) // ⬅️ updated to Java 17
 }
 
 flutter {
     source = "../.."
-}
-
-dependencies {
-    // ✅ Updated to required version
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-
-    implementation("androidx.multidex:multidex:2.0.1")
 }

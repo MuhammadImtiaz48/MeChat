@@ -3,19 +3,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:imtiaz/controllers/home_screen_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:intl/intl.dart';
 import 'package:imtiaz/models/userchat.dart';
-import 'package:imtiaz/views/ui_screens/chat_screen.dart';
-import 'package:imtiaz/views/ui_screens/chat_screenAi.dart';
 import 'package:imtiaz/views/ui_screens/user_profile.dart';
 import 'package:imtiaz/widgets/user_chat_card.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:google_fonts/google_fonts.dart'; // Added for Poppins font
+import 'package:google_fonts/google_fonts.dart';
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -32,16 +30,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  bool _isOnline = true;
   late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
 
   @override
   void initState() {
     super.initState();
-    debugPrint('HomeScreen: Initializing for userName=${widget.userName} at ${DateTime.now()}');
+    if (kDebugMode) {
+      debugPrint('HomeScreen: Initializing for userName=${widget.userName} at ${DateTime.now()}');
+    }
     controller = Get.put(HomeController());
     _loadUserNameFromFirestore();
-    _checkConnectivity();
+    _initializeConnectivity();
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      controller.loadUsers(); // Load sorted users on start
+    });
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
@@ -76,10 +78,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               'name': validName,
               'lastActive': FieldValue.serverTimestamp(),
             }, SetOptions(merge: true));
-            debugPrint('✅ HomeScreen: Fixed Firestore name to $validName for uid=${user.uid}');
+            if (kDebugMode) {
+              debugPrint('✅ HomeScreen: Fixed Firestore name to $validName for uid=${user.uid}');
+            }
           }
         } else {
-          debugPrint('⚠️ HomeScreen: User document not found for uid=${user.uid}');
+          if (kDebugMode) {
+            debugPrint('⚠️ HomeScreen: User document not found for uid=${user.uid}');
+          }
           String fallbackName = user.email?.split('@')[0] ?? 'User-${user.uid.substring(0, 6)}';
           controller.loggedInUserName.value = fallbackName;
           final prefs = await SharedPreferences.getInstance();
@@ -89,100 +95,88 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             'email': user.email ?? '',
             'lastActive': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
-          debugPrint('✅ HomeScreen: Set fallback name $fallbackName for uid=${user.uid}');
+          if (kDebugMode) {
+            debugPrint('✅ HomeScreen: Set fallback name $fallbackName for uid=${user.uid}');
+          }
         }
       } catch (e) {
-        debugPrint('❌ HomeScreen: Error loading user name: $e');
+        if (kDebugMode) {
+          debugPrint('❌ HomeScreen: Error loading user name: $e');
+        }
         final prefs = await SharedPreferences.getInstance();
         String cachedName = prefs.getString('user_name') ?? '';
         String fallbackName = user.email?.split('@')[0] ?? 'User-${user.uid.substring(0, 6)}';
         controller.loggedInUserName.value = cachedName.isNotEmpty && cachedName.toLowerCase() != 'unknown' ? cachedName : fallbackName;
         await prefs.setString('user_name', controller.loggedInUserName.value);
-        debugPrint('✅ HomeScreen: Set name from cache or fallback: ${controller.loggedInUserName.value}');
+        if (kDebugMode) {
+          debugPrint('✅ HomeScreen: Set name from cache or fallback: ${controller.loggedInUserName.value}');
+        }
       }
     } else {
       controller.loggedInUserName.value = widget.userName.isNotEmpty && widget.userName.toLowerCase() != 'unknown' ? widget.userName : 'User';
-      debugPrint('⚠️ HomeScreen: No authenticated user, using fallback name: ${controller.loggedInUserName.value}');
+      if (kDebugMode) {
+        debugPrint('⚠️ HomeScreen: No authenticated user, using fallback name: ${controller.loggedInUserName.value}');
+      }
     }
   }
 
-  Future<void> _checkConnectivity() async {
+  Future<void> _initializeConnectivity() async {
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
-      setState(() {
-        _isOnline = !connectivityResult.contains(ConnectivityResult.none);
-      });
-      if (!_isOnline && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'You are offline. Showing cached data.',
-              style: GoogleFonts.poppins(fontSize: 14.sp),
-            ),
-            backgroundColor: Colors.orange.shade600,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
-            margin: EdgeInsets.all(16.w),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'Dismiss',
-              textColor: Colors.white,
-              onPressed: () => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
-            ),
-          ),
-        );
+      final connectivityResult = await Connectivity().checkConnectivity().timeout(const Duration(seconds: 5));
+      controller.isOnline.value = !connectivityResult.contains(ConnectivityResult.none);
+      if (!controller.isOnline.value && mounted) {
+        _showSnackBar('Offline', 'Showing cached data.', Colors.orange);
       }
-      _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
-        setState(() {
-          _isOnline = !results.contains(ConnectivityResult.none);
-        });
-        if (!_isOnline && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'You are offline. Showing cached data.',
-                style: GoogleFonts.poppins(fontSize: 14.sp),
-              ),
-              backgroundColor: Colors.orange.shade600,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
-              margin: EdgeInsets.all(16.w),
-              duration: const Duration(seconds: 4),
-              action: SnackBarAction(
-                label: 'Dismiss',
-                textColor: Colors.white,
-                onPressed: () => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
-              ),
-            ),
-          );
+      _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+        final isOnline = !results.contains(ConnectivityResult.none);
+        if (controller.isOnline.value != isOnline) {
+          controller.isOnline.value = isOnline;
+          if (!isOnline && mounted) {
+            _showSnackBar('Offline', 'Showing cached data.', Colors.orange);
+          } else {
+            // Reload users when back online for fresh sorted data
+            controller.loadUsers();
+          }
         }
       });
     } catch (e) {
-      debugPrint('❌ HomeScreen: Connectivity check error: $e');
-      setState(() {
-        _isOnline = false;
-      });
+      if (kDebugMode) {
+        debugPrint('❌ HomeScreen: Connectivity error: $e');
+      }
+      controller.isOnline.value = false;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to check connectivity',
-              style: GoogleFonts.poppins(fontSize: 14.sp),
-            ),
-            backgroundColor: Colors.red.shade600,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
-            margin: EdgeInsets.all(16.w),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'Dismiss',
-              textColor: Colors.white,
-              onPressed: () => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
-            ),
-          ),
-        );
+        _showSnackBar('Error', 'Unable to check network connection', Colors.red);
       }
     }
+  }
+
+  void _showSnackBar(String title, String message, Color backgroundColor) {
+    if (Get.isSnackbarOpen) Get.closeAllSnackbars();
+    Get.snackbar(
+      title,
+      message,
+      backgroundColor: backgroundColor,
+      colorText: Colors.white,
+      snackPosition: SnackPosition.TOP,
+      borderRadius: 10.r,
+      margin: EdgeInsets.all(16.w),
+      duration: const Duration(seconds: 3),
+      titleText: Text(
+        title,
+        style: GoogleFonts.poppins(
+          fontSize: 16.sp,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      ),
+      messageText: Text(
+        message,
+        style: GoogleFonts.poppins(
+          fontSize: 14.sp,
+          color: Colors.white,
+        ),
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -191,30 +185,24 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
       Get.offAllNamed('/dashboard');
-      debugPrint('✅ HomeScreen: User logged out at ${DateTime.now()}');
+      if (kDebugMode) {
+        debugPrint('✅ HomeScreen: User logged out at ${DateTime.now()}');
+      }
     } catch (e) {
-      debugPrint('❌ HomeScreen: Logout error: $e');
+      if (kDebugMode) {
+        debugPrint('❌ HomeScreen: Logout error: $e');
+      }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Logout failed: $e',
-              style: GoogleFonts.poppins(fontSize: 14.sp),
-            ),
-            backgroundColor: Colors.red.shade600,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
-            margin: EdgeInsets.all(16.w),
-            duration: const Duration(seconds: 4),
-          ),
-        );
+        _showSnackBar('Error', 'Logout failed: $e', Colors.red);
       }
     }
   }
 
   @override
   void dispose() {
-    debugPrint('HomeScreen: Disposing at ${DateTime.now()}');
+    if (kDebugMode) {
+      debugPrint('HomeScreen: Disposing at ${DateTime.now()}');
+    }
     _connectivitySubscription.cancel();
     _animationController.dispose();
     super.dispose();
@@ -227,8 +215,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       minTextAdapt: true,
       splitScreenMode: true,
       builder: (context, child) {
-        final isTablet = MediaQuery.of(context).size.width >= 600;
-        final isSmallScreen = MediaQuery.of(context).size.width < 360;
+        final screenWidth = MediaQuery.of(context).size.width;
+        final screenHeight = MediaQuery.of(context).size.height;
+        final isTablet = screenWidth >= 600;
+        final isSmallScreen = screenWidth < 360;
+        final isTallScreen = screenHeight > 750;
         final fontSizeTitle = isSmallScreen ? 18.sp : isTablet ? 24.sp : 20.sp;
         final fontSizeSubtitle = isSmallScreen ? 12.sp : isTablet ? 16.sp : 14.sp;
         final paddingHorizontal = isSmallScreen ? 12.w : isTablet ? 24.w : 16.w;
@@ -236,44 +227,49 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         final iconSize = isSmallScreen ? 20.w : isTablet ? 28.w : 24.w;
 
         return Scaffold(
-          appBar: AppBar(
-            backgroundColor: const Color(0xFF075E54), // Updated to match GeminiChatScreen
-            elevation: 0,
-            title: Text(
-              'MeChat',
-              style: GoogleFonts.poppins(
-                fontSize: fontSizeTitle,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 1.2,
-              ),
-            ),
-            centerTitle: true,
-            leading: IconButton(
-              icon: Icon(Icons.menu, color: Colors.white, size: iconSize),
-              onPressed: () => Scaffold.of(context).openDrawer(),
-              tooltip: 'Menu',
-            ),
-            actions: [
-              IconButton(
-                icon: Icon(Icons.search, color: Colors.white, size: iconSize),
-                onPressed: () {
-                  controller.isSearching.value = !controller.isSearching.value;
-                  if (!controller.isSearching.value) {
-                    controller.clearSearch();
-                  }
-                },
-                tooltip: 'Search',
-              ),
-            ],
-            flexibleSpace: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF075E54), Color(0xFF075E54)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+          backgroundColor: Colors.white,
+          appBar: PreferredSize(
+            preferredSize: Size.fromHeight(isTablet ? 80.h : isTallScreen ? 64.h : 56.h),
+            child: AppBar(
+              backgroundColor: const Color(0xFF075E54),
+              elevation: 0,
+              toolbarHeight: isTablet ? 80.h : isTallScreen ? 64.h : 56.h,
+              flexibleSpace: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF075E54), Color.fromARGB(255, 37, 224, 202)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                 ),
               ),
+              title: Text(
+                'MeChat',
+                style: GoogleFonts.poppins(
+                  fontSize: fontSizeTitle,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              centerTitle: true,
+              leading: IconButton(
+                icon: Icon(Icons.menu, color: Colors.white, size: iconSize),
+                onPressed: () => Scaffold.of(context).openDrawer(),
+                tooltip: 'Menu',
+              ),
+              actions: [
+                IconButton(
+                  icon: Icon(Icons.search, color: Colors.white, size: iconSize),
+                  onPressed: () {
+                    controller.isSearching.value = !controller.isSearching.value;
+                    if (!controller.isSearching.value) {
+                      controller.clearSearch();
+                    }
+                  },
+                  tooltip: 'Search',
+                ),
+              ],
             ),
           ),
           drawer: Drawer(
@@ -343,6 +339,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       style: GoogleFonts.poppins(fontSize: fontSizeSubtitle, color: Colors.white),
                     ),
                     onTap: () async {
+                      Get.back(); // Close drawer
                       try {
                         UserchatModel userProfile;
                         if (controller.isOnline.value) {
@@ -361,33 +358,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             uid: _auth.currentUser!.uid,
                             name: prefs.getString('user_name') ?? (_auth.currentUser!.email?.split('@')[0] ?? 'User-${_auth.currentUser!.uid.substring(0, 6)}'),
                             email: prefs.getString('user_email') ?? '',
-                            profilePic: prefs.getString('user_profilePic') ?? '',
-                            fcmToken: prefs.getString('user_fcmToken') ?? '',
                             image: '',
+                            fcmToken: prefs.getString('user_fcmToken') ?? '',
+                            profilePic: prefs.getString('user_profilePic') ?? '',
                           );
                         }
-                        Get.toNamed('/UserProfile', arguments: {
-                          'userId': userProfile.uid,
-                          'userName': userProfile.name,
-                        });
+                        Get.to(() => UserProfileScreen(user: userProfile, userId: userProfile.uid, userName: userProfile.name));
                       } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Failed to load profile: ${controller.isOnline.value ? e.toString().split('.').first : 'Offline mode'}',
-                              style: GoogleFonts.poppins(fontSize: 14.sp),
-                            ),
-                            backgroundColor: Colors.red.shade600,
-                            behavior: SnackBarBehavior.floating,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
-                            margin: EdgeInsets.all(16.w),
-                            duration: const Duration(seconds: 4),
-                            action: SnackBarAction(
-                              label: 'Dismiss',
-                              textColor: Colors.white,
-                              onPressed: () => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
-                            ),
-                          ),
+                        _showSnackBar(
+                          'Error',
+                          'Failed to load profile: ${controller.isOnline.value ? e.toString().split('.').first : 'Offline mode'}',
+                          Colors.red,
                         );
                       }
                     },
@@ -399,6 +380,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       style: GoogleFonts.poppins(fontSize: fontSizeSubtitle, color: Colors.white),
                     ),
                     onTap: () {
+                      Get.back(); // Close drawer
                       Get.dialog(
                         AlertDialog(
                           title: Text('Logout', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
@@ -410,7 +392,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                               child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF075E54))),
                             ),
                             TextButton(
-                              onPressed: _logout,
+                              onPressed: () {
+                                Get.back(); // Close dialog
+                                _logout();
+                              },
                               child: Text('Logout', style: GoogleFonts.poppins(color: Colors.red)),
                             ),
                           ],
@@ -438,17 +423,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   children: [
                     Obx(() => !controller.isOnline.value
                         ? Container(
-                            padding: EdgeInsets.symmetric(vertical: paddingVertical),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.shade100,
-                              border: Border(bottom: BorderSide(color: Colors.orange.shade600, width: 1.w)),
-                            ),
+                            color: Colors.orange[100],
+                            padding: EdgeInsets.symmetric(vertical: 6.h),
                             child: Center(
                               child: Text(
-                                'Offline: Showing cached users',
+                                'Offline: Showing cached data',
                                 style: GoogleFonts.poppins(
                                   fontSize: fontSizeSubtitle,
-                                  color: Colors.orange.shade800,
+                                  color: Colors.orange[800],
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -501,7 +483,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         if (controller.filteredUsers.isEmpty && controller.isOnline.value) {
                           return Column(
                             children: [
-                              _buildGeminiCard(context, isTablet, fontSizeSubtitle, iconSize), // Always show Gemini AI card
+                              _buildGeminiCard(context, isTablet, fontSizeSubtitle, iconSize),
                               Expanded(child: _buildEmptyState(isTablet, fontSizeSubtitle, controller)),
                             ],
                           );
@@ -516,7 +498,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             if (index == 0) {
                               return _buildGeminiCard(context, isTablet, fontSizeSubtitle, iconSize);
                             }
-                            final user = controller.filteredUsers[index - 1];
+                            final userIndex = index - 1;
+                            if (userIndex >= controller.filteredUsers.length) {
+                              return const SizedBox.shrink(); // Prevent index out of range
+                            }
+                            final user = controller.filteredUsers[userIndex];
+                            if (user.uid.isEmpty) {
+                              return const SizedBox.shrink(); // Skip invalid users
+                            }
                             return Padding(
                               padding: EdgeInsets.only(bottom: 8.h),
                               child: UserChatCard(
@@ -538,7 +527,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                     ? controller.loggedInUserName.value
                                     : widget.userName.isNotEmpty && widget.userName.toLowerCase() != 'unknown'
                                         ? widget.userName
-                                        : 'User', currentUserId: '', senderId: '', senderName: '', message: '', time: null, seen: null, showSeen: null, maxWidth: null,
+                                        : 'User',
+                                currentUserId: _auth.currentUser?.uid ?? '',
+                                senderId: '',
+                                senderName: '',
+                                message: '',
+                                time: null,
+                                seen: null,
+                                showSeen: null,
+                                maxWidth: null,
                               ),
                             );
                           },
@@ -564,19 +561,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 Get.toNamed('/gemini_chat');
               }
             : () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'AI chat requires internet connection',
-                      style: GoogleFonts.poppins(fontSize: fontSizeSubtitle),
-                    ),
-                    backgroundColor: Colors.orange.shade600,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
-                    margin: EdgeInsets.all(16.w),
-                    duration: const Duration(seconds: 4),
-                  ),
-                );
+                _showSnackBar('Offline', 'AI chat requires internet connection', Colors.orange);
               },
         child: Container(
           decoration: BoxDecoration(
@@ -707,7 +692,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
           SizedBox(height: 16.h),
           Text(
-            'No users found',
+            'No chats found',
             style: GoogleFonts.poppins(
               fontSize: fontSizeSubtitle,
               color: Colors.grey[600],
@@ -724,11 +709,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 12.h),
               ),
               child: Text(
-                'Retry',
+                'Refresh',
                 style: GoogleFonts.poppins(
                   fontSize: fontSizeSubtitle,
                   fontWeight: FontWeight.w600,
-                  color: const Color.fromARGB(255, 1, 7, 43),
+                  color: const Color(0xFF075E54),
                 ),
               ),
             ),

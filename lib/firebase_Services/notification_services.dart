@@ -1,47 +1,30 @@
 import 'dart:convert';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:googleapis_auth/auth_io.dart';
 import 'package:get/get.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:google_fonts/google_fonts.dart';
-
-class RingtoneService {
-  static final AudioPlayer _player = AudioPlayer();
-
-  static Future<void> playRingtone() async {
-    try {
-      await _player.setReleaseMode(ReleaseMode.loop);
-      await _player.play(AssetSource('sounds/ringtone.mp3'));
-      debugPrint('✅ RingtoneService: Playing ringtone');
-    } catch (e) {
-      debugPrint('⚠️ RingtoneService: Error playing ringtone: $e');
-    }
-  }
-
-  static Future<void> stopRingtone() async {
-    try {
-      await _player.stop();
-      debugPrint('✅ RingtoneService: Stopped ringtone');
-    } catch (e) {
-      debugPrint('⚠️ RingtoneService: Error stopping ringtone: $e');
-    }
-  }
-}
+import 'package:flutter/services.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'ringtone_service.dart';
 
 class NotificationService {
   static const _scopes = ['https://www.googleapis.com/auth/firebase.messaging'];
   static final FlutterLocalNotificationsPlugin _localNotificationsPlugin = FlutterLocalNotificationsPlugin();
   static const String _channelId = 'chat_channel_v1';
   static const String _channelName = 'Chat Notifications';
+  static const String _methodChannel = 'com.example.flutter_application_1/notifications';
   static String? _currentChatId;
 
   static void setCurrentChatId(String? chatId) {
     _currentChatId = chatId;
-    debugPrint('🔔 NotificationService: Current chat ID set to: $_currentChatId');
+    if (kDebugMode) {
+      debugPrint('🔔 NotificationService: Current chat ID set to: $_currentChatId');
+    }
   }
 
   static Future<void> init({
@@ -49,9 +32,8 @@ class NotificationService {
   }) async {
     try {
       debugPrint('🔔 NotificationService: Initializing');
-      const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-      const DarwinInitializationSettings iosSettings = DarwinInitializationSettings();
-      const InitializationSettings initSettings = InitializationSettings(android: androidSettings, iOS: iosSettings);
+      const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('launcher_icon');
+      const InitializationSettings initSettings = InitializationSettings(android: androidSettings);
 
       await _localNotificationsPlugin
           .initialize(
@@ -62,6 +44,9 @@ class NotificationService {
                   final payloadData = jsonDecode(details.payload!) as Map<String, dynamic>;
                   debugPrint('🔔 NotificationService: Notification tapped: $payloadData');
                   await onNotificationTap(payloadData.cast<String, String>());
+                  if (payloadData['type'] == 'call') {
+                    await RingtoneService.stopRingtone();
+                  }
                 } catch (e) {
                   debugPrint('⚠️ NotificationService: Error parsing notification payload: $e');
                 }
@@ -73,7 +58,7 @@ class NotificationService {
             return false;
           });
 
-      const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      const AndroidNotificationChannel notificationChannel = AndroidNotificationChannel(
         _channelId,
         _channelName,
         description: 'Messages and call notifications',
@@ -84,7 +69,89 @@ class NotificationService {
 
       await _localNotificationsPlugin
           .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(channel);
+          ?.createNotificationChannel(notificationChannel);
+
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        carPlay: false,
+        criticalAlert: false,
+        provisional: false,
+      );
+
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        if (kDebugMode) {
+          debugPrint('🔔 NotificationService: Received foreground message: ${message.notification?.title}');
+        }
+        if (message.data['chatId'] != _currentChatId && message.data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+          showLocalNotification(
+            id: message.messageId?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
+            title: message.notification?.title ?? 'New Message',
+            body: message.notification?.body ?? 'You have a new message!',
+            payload: jsonEncode(message.data),
+            type: message.data['type'],
+            chatId: message.data['chatId'],
+          );
+        }
+      });
+
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        if (kDebugMode) {
+          debugPrint('🔔 NotificationService: Opened from background message: ${message.notification?.title}');
+        }
+        if (message.data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+          onNotificationTap(message.data.cast<String, String>());
+          if (message.data['type'] == 'call') {
+            RingtoneService.stopRingtone();
+          }
+        }
+      });
+
+      final initialMessage = await messaging.getInitialMessage();
+      if (initialMessage != null && initialMessage.data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+        if (kDebugMode) {
+          debugPrint('🔔 NotificationService: Opened from terminated message: ${initialMessage.notification?.title}');
+        }
+        onNotificationTap(initialMessage.data.cast<String, String>());
+        if (initialMessage.data['type'] == 'call') {
+          RingtoneService.stopRingtone();
+        }
+      }
+
+      const MethodChannel methodChannel = MethodChannel(_methodChannel);
+      methodChannel.setMethodCallHandler((call) async {
+        if (call.method == 'onMessageReceived') {
+          final data = call.arguments as Map;
+          if (kDebugMode) {
+            debugPrint('🔔 NotificationService: Received native message: $data');
+          }
+          if (data['chatId'] != _currentChatId && data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+            showLocalNotification(
+              id: data['messageId']?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
+              title: data['title'] ?? 'New Message',
+              body: data['body'] ?? 'You have a new message!',
+              payload: jsonEncode(data),
+              type: data['type'],
+              chatId: data['chatId'],
+            );
+          }
+        } else if (call.method == 'onNewToken') {
+          final token = call.arguments as String;
+          if (kDebugMode) {
+            debugPrint('🔔 NotificationService: New FCM token: $token');
+          }
+          final user = FirebaseAuth.instance.currentUser;
+          if (user != null) {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .update({'fcmToken': token});
+          }
+        }
+      });
+
       debugPrint('✅ NotificationService: Initialized');
     } catch (e) {
       debugPrint('⚠️ NotificationService: Error initializing: $e');
@@ -111,20 +178,20 @@ class NotificationService {
         channelDescription: 'Chat messages & call notifications',
         importance: Importance.max,
         priority: Priority.high,
-        playSound: true,
-        sound: type == 'call' ? const RawResourceAndroidNotificationSound('ringtone') : const RawResourceAndroidNotificationSound('default'),
+        playSound: type != 'call',
+        sound: type == 'call' ? null : const RawResourceAndroidNotificationSound('default'),
         groupKey: id.toString(),
+        fullScreenIntent: type == 'call',
       );
 
-      final DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-        presentSound: true,
-        sound: type == 'call' ? 'ringtone.caf' : 'default',
-      );
-
-      final NotificationDetails platformDetails = NotificationDetails(android: androidDetails, iOS: iosDetails);
+      final NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
 
       await _localNotificationsPlugin.show(id, title, body, platformDetails, payload: payload);
       debugPrint('🔔 NotificationService: Local notification shown: id=$id, title=$title, body=$body');
+
+      if (type == 'call') {
+        await RingtoneService.playRingtone();
+      }
     } catch (e) {
       debugPrint('⚠️ NotificationService: Error showing local notification: $e');
     }
@@ -133,6 +200,7 @@ class NotificationService {
   static Future<void> cancelNotificationsForChat(String id) async {
     try {
       await _localNotificationsPlugin.cancel(id.hashCode);
+      await RingtoneService.stopRingtone();
       debugPrint('✅ NotificationService: Notifications cancelled for ID: $id');
     } catch (e) {
       debugPrint('⚠️ NotificationService: Error cancelling notifications: $e');
@@ -164,68 +232,70 @@ class NotificationService {
     required String targetToken,
     required String title,
     required String body,
-    required Map<String, String> payload, required String type, required String senderId, required String chatId, required String senderName, required String callType, required String callId, required Map data,
+    required Map<String, dynamic> payload, required String type, required String senderId, required String chatId, required String senderName, required String callType, required String callId, required Map data,
   }) async {
-    try {
-      debugPrint('🔔 NotificationService: Sending push notification to $targetToken');
-      final client = await _getAuthClient();
-      final serviceAccount = await _loadServiceAccount();
-      final projectId = serviceAccount['project_id'];
+    for (int i = 0; i < 3; i++) {
+      try {
+        debugPrint('🔔 NotificationService: Sending push notification to $targetToken (attempt ${i + 1})');
+        final client = await _getAuthClient();
+        final serviceAccount = await _loadServiceAccount();
+        final projectId = serviceAccount["project_id"];
+        debugPrint('🔔 NotificationService: Using project ID: $projectId');
 
-      final url = Uri.parse('https://fcm.googleapis.com/v1/projects/$projectId/messages:send');
+        final url = Uri.parse('https://fcm.googleapis.com/v1/projects/$projectId/messages:send');
 
-      // Build notification data based on payload type
-      final notificationData = {
-        'title': title,
-        'body': body,
-        'sound': payload['type'] == 'call' ? 'ringtone' : 'default',
-      };
+        final messageData = payload.map((key, value) => MapEntry(key, value.toString()));
 
-      final androidConfig = {
-        'notification': {
-          ...notificationData,
-          'channel_id': _channelId,
-        },
-      };
-
-      final apnsConfig = {
-        'payload': {
-          'aps': {
-            ...notificationData,
-            'sound': payload['type'] == 'call' ? 'ringtone.caf' : 'default',
+        final androidConfig = {
+          'notification': {
+            'title': title,
+            'body': body,
+            'channel_id': _channelId,
+            'sound': payload['type'] == 'call' ? 'ringtone' : 'default',
           },
-        },
-      };
+          'data': messageData,
+        };
 
-      final message = {
-        'message': {
-          'token': targetToken,
-          'notification': notificationData,
-          'data': payload,
-          'android': androidConfig,
-          'apns': apnsConfig,
-        },
-      };
+        final message = {
+          'message': {
+            'token': targetToken,
+            'notification': {
+              'title': title,
+              'body': body,
+            },
+            'data': messageData,
+            'android': androidConfig,
+          },
+        };
 
-      final response = await client.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(message),
-      );
+        final response = await client
+            .post(
+              url,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(message),
+            )
+            .timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        debugPrint('✅ NotificationService: Notification sent: ${response.body}');
-        return true;
-      } else {
-        debugPrint('❌ NotificationService: Notification failed: ${response.statusCode} => ${response.body}');
-        _showErrorSnackbar('Failed to send notification');
-        return false;
+        if (response.statusCode == 200) {
+          debugPrint('✅ NotificationService: Notification sent: ${response.body}');
+          return true;
+        } else {
+          debugPrint('❌ NotificationService: Notification failed: ${response.statusCode} => ${response.body}');
+          if (i == 2) {
+            _showErrorSnackbar('Failed to send notification: ${response.statusCode}');
+            return false;
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ NotificationService: Error sending notification: $e');
+        if (i == 2) {
+          _showErrorSnackbar('Failed to send notification: $e');
+          return false;
+        }
+        await Future.delayed(const Duration(seconds: 2));
       }
-    } catch (e) {
-      debugPrint('⚠️ NotificationService: Error sending notification: $e');
-      _showErrorSnackbar('Failed to send notification: Network error');
-      return false;
     }
+    return false;
   }
 
   static void _showErrorSnackbar(String message) {

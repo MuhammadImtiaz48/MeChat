@@ -1,12 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:imtiaz/controllers/signup_controller.dart';
-import 'package:imtiaz/views/ui_screens/home.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class SignupScreen extends StatelessWidget {
   const SignupScreen({super.key});

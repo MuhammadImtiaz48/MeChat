@@ -119,7 +119,7 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFF3F51B5), Color(0xFF7986CB)],
+              colors: [Color(0xFF075E54), Color(0xFF25D366)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -159,7 +159,7 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
                               maxWidth: MediaQuery.of(context).size.width * 0.75,
                             ),
                             decoration: BoxDecoration(
-                              color: isUser ? const Color(0xFF3F51B5) : Colors.white,
+                              color: isUser ? const Color(0xFF075E54) : Colors.white,
                               borderRadius: BorderRadius.circular(16),
                               boxShadow: [
                                 BoxShadow(
@@ -257,11 +257,11 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.image, color: Color(0xFF3F51B5)),
+                    icon: const Icon(Icons.image, color: Color(0xFF075E54)),
                     onPressed: () => _pickImage(ImageSource.gallery),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.camera_alt, color: Color(0xFF3F51B5)),
+                    icon: const Icon(Icons.camera_alt, color: Color(0xFF075E54)),
                     onPressed: () => _pickImage(ImageSource.camera),
                   ),
                   Expanded(
@@ -292,12 +292,12 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
                             height: 24,
                             child: CircularProgressIndicator(
                               strokeWidth: 3,
-                              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3F51B5)),
+                              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF075E54)),
                             ),
                           ),
                         )
                       : IconButton(
-                          icon: const Icon(Icons.send, color: Color(0xFF3F51B5)),
+                          icon: const Icon(Icons.send, color: Color(0xFF075E54)),
                           onPressed: _sendMessage,
                         ),
                 ],

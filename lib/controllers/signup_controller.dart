@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:get/get_core/src/get_main.dart';
 import 'package:imtiaz/views/ui_screens/home.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -63,8 +62,9 @@ class SignupController extends GetxController {
       }
     } on FirebaseAuthException catch (e) {
       String errorMessage = 'Signup failed';
-      if (e.code == 'email-already-in-use') errorMessage = 'This email is already in use';
-      else if (e.code == 'weak-password') errorMessage = 'Password should be at least 6 characters';
+      if (e.code == 'email-already-in-use') {
+        errorMessage = 'This email is already in use';
+      } else if (e.code == 'weak-password') errorMessage = 'Password should be at least 6 characters';
       Get.snackbar('Error', errorMessage, backgroundColor: Colors.red, colorText: Colors.white);
     } catch (e) {
       Get.snackbar('Error', 'Signup failed: $e', backgroundColor: Colors.red, colorText: Colors.white);

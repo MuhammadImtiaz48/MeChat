@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:imtiaz/firebase_Services/notification_services.dart';
+import 'package:imtiaz/firebase_Services/ringtone_service.dart';
 import 'package:imtiaz/views/ui_screens/vediocall.dart';
 import 'package:imtiaz/views/ui_screens/vediocalling_screen.dart';
 
@@ -25,7 +26,7 @@ class CallService {
             callerName: callerName,
             callerId: callerId,
             callId: callId,
-            callType: callType,
+            callType: callType, userId: '', userName: '',
           ))?.then((_) {
         _isCallScreenOpen = false;
         RingtoneService.stopRingtone();
