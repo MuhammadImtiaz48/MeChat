@@ -13,7 +13,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeController extends GetxController {
   final RxList<UserchatModel> filteredUsers = <UserchatModel>[].obs;
+  final RxList<UserchatModel> allUsers = <UserchatModel>[].obs;
   final RxList<UserchatModel> _allUsers = <UserchatModel>[].obs;
+  final RxSet<String> deletedUserIds = <String>{}.obs;
   final RxBool loadingUsers = false.obs;
   final RxBool isSearching = false.obs;
   final RxString loggedInUserName = ''.obs;
@@ -29,14 +31,21 @@ class HomeController extends GetxController {
     _loadUsersDebouncer = CancelableOperation<void>.fromFuture(Future.value());
   }
 
+  Future<void> _loadDeletedUsers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final deletedIds = prefs.getStringList('deleted_user_ids') ?? [];
+    deletedUserIds.assignAll(deletedIds.toSet());
+    if (kDebugMode) debugPrint('HomeController: Loaded ${deletedUserIds.length} deleted user IDs');
+  }
+
+
   @override
   void onInit() {
     super.onInit();
     if (kDebugMode) {
       debugPrint('HomeController: Initializing at ${DateTime.now()}');
     }
-    // Clear cache for testing to avoid outdated data
-    SharedPreferences.getInstance().then((prefs) => prefs.remove('cached_users'));
+    _loadDeletedUsers();
     _initializeConnectivity();
     _initializeFCM();
     searchController.addListener(() => filterUsers(searchController.text));
@@ -59,7 +68,7 @@ class HomeController extends GetxController {
 
   Future<void> _initializeConnectivity() async {
     try {
-      final result = await Connectivity().checkConnectivity().timeout(const Duration(seconds: 5));
+      final result = await Connectivity().checkConnectivity().timeout(const Duration(seconds: 15));
       isOnline.value = !result.contains(ConnectivityResult.none);
       if (kDebugMode) debugPrint('HomeController: Initial connectivity: ${isOnline.value ? "Online" : "Offline"}');
       _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
@@ -149,11 +158,27 @@ class HomeController extends GetxController {
     if (kDebugMode) {
       debugPrint('HomeController: Sorting ${users.length} users');
       for (var user in users) {
-        debugPrint('User: ${user.name}, lastMessageTime: ${user.lastMessageTime}');
+        debugPrint('User: ${user.name}, lastMessageTime: ${user.lastMessageTime}, unreadCount: ${user.unreadCount}');
       }
     }
     users.sort((a, b) {
-      // Prioritize users with valid lastMessageTime
+      // First priority: Users with unread messages
+      if (a.unreadCount > 0 && b.unreadCount == 0) {
+        return -1; // a comes first (has unread messages)
+      } else if (a.unreadCount == 0 && b.unreadCount > 0) {
+        return 1; // b comes first (has unread messages)
+      } else if (a.unreadCount > 0 && b.unreadCount > 0) {
+        // Both have unread messages, sort by message time (most recent first)
+        if (a.lastMessageTime != null && b.lastMessageTime != null) {
+          final timeCompare = b.lastMessageTime!.compareTo(a.lastMessageTime!);
+          if (timeCompare != 0) return timeCompare;
+        }
+        // If times are equal or one is null, sort by unread count (higher first)
+        final unreadCompare = b.unreadCount.compareTo(a.unreadCount);
+        if (unreadCompare != 0) return unreadCompare;
+      }
+
+      // Second priority: Users with valid lastMessageTime (for users with no unread messages)
       if (a.lastMessageTime == null && b.lastMessageTime == null) {
         return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       } else if (a.lastMessageTime == null) {
@@ -161,6 +186,7 @@ class HomeController extends GetxController {
       } else if (b.lastMessageTime == null) {
         return -1; // a comes first (has a valid timestamp)
       }
+
       try {
         final timeA = a.lastMessageTime!;
         final timeB = b.lastMessageTime!;
@@ -176,7 +202,7 @@ class HomeController extends GetxController {
     if (kDebugMode) {
       debugPrint('HomeController: Sorted users:');
       for (var user in users) {
-        debugPrint('User: ${user.name}, lastMessageTime: ${user.lastMessageTime}');
+        debugPrint('User: ${user.name}, lastMessageTime: ${user.lastMessageTime}, unreadCount: ${user.unreadCount}');
       }
     }
   }
@@ -201,6 +227,7 @@ class HomeController extends GetxController {
           final users = userMaps.map((map) => UserchatModel.fromMap(Map<String, dynamic>.from(map as Map))).toList();
           _sortUsers(users);
           _allUsers.assignAll(users);
+          allUsers.assignAll(users);
           filteredUsers.assignAll(users);
           if (kDebugMode) debugPrint('HomeController: Loaded ${users.length} cached users');
         } catch (e) {
@@ -210,6 +237,7 @@ class HomeController extends GetxController {
           filteredUsers.clear();
         }
       }
+      loadingUsers.value = false;
       return;
     }
 
@@ -231,7 +259,7 @@ class HomeController extends GetxController {
           .limit(50);
 
       if (kDebugMode) debugPrint('HomeController: Executing users query...');
-      final usersSnapshot = await usersQuery.get().timeout(const Duration(seconds: 10));
+      final usersSnapshot = await usersQuery.get().timeout(const Duration(seconds: 15));
       if (kDebugMode) debugPrint('HomeController: Users query returned ${usersSnapshot.docs.length} documents');
 
       final List<UserchatModel> users = [];
@@ -253,7 +281,7 @@ class HomeController extends GetxController {
           .limit(50);
 
       if (kDebugMode) debugPrint('HomeController: Executing chats query...');
-      final chatSnapshot = await chatsQuery.get().timeout(const Duration(seconds: 15));
+      final chatSnapshot = await chatsQuery.get().timeout(const Duration(seconds: 20));
       if (kDebugMode) debugPrint('HomeController: Chats query returned ${chatSnapshot.docs.length} documents');
 
       final Map<String, Map<String, dynamic>> chatDataByOtherUid = <String, Map<String, dynamic>>{};
@@ -275,6 +303,12 @@ class HomeController extends GetxController {
 
       // Step 3: Combine user data with chat data
       for (var userUid in allUserDataMap.keys) {
+        // Skip deleted users
+        if (deletedUserIds.contains(userUid)) {
+          if (kDebugMode) debugPrint('HomeController: Skipping deleted user $userUid');
+          continue;
+        }
+
         final userData = Map<String, dynamic>.from(allUserDataMap[userUid]!);
         final chatData = chatDataByOtherUid[userUid];
 
@@ -290,15 +324,21 @@ class HomeController extends GetxController {
           if (chatData['lastMessage'] != null) {
             userData['lastMessage'] = chatData['lastMessage']?.toString() ?? '';
           }
+
+          // Calculate unread count for this chat
+          final chatId = chatData['chatId'] ?? _generateChatId(currentUid, userUid);
+          final unreadCount = await _getUnreadCount(chatId, currentUid);
+          userData['unreadCount'] = unreadCount;
         } else {
           userData['lastMessageTime'] = null;
           userData['lastMessage'] = '';
+          userData['unreadCount'] = 0;
         }
 
         final user = UserchatModel.fromMap(userData);
         if (user.uid.isNotEmpty && !users.any((u) => u.uid == user.uid)) {
           users.add(user);
-          if (kDebugMode) debugPrint('HomeController: Added user ${user.name} (${user.uid}) with lastMessageTime: ${user.lastMessageTime}');
+          if (kDebugMode) debugPrint('HomeController: Added user ${user.name} (${user.uid}) with lastMessageTime: ${user.lastMessageTime}, unreadCount: ${user.unreadCount}');
         }
       }
 
@@ -353,5 +393,34 @@ class HomeController extends GetxController {
     isSearching.value = false;
     if (kDebugMode) debugPrint('HomeController: Clearing search');
     filteredUsers.assignAll(_allUsers.toList());
+  }
+
+  String _generateChatId(String uid1, String uid2) {
+    final sortedUids = [uid1, uid2]..sort();
+    return '${sortedUids[0]}_${sortedUids[1]}';
+  }
+
+  Future<int> _getUnreadCount(String chatId, String currentUserId) async {
+    try {
+      // Get all messages from other users first, then filter for unseen ones
+      // This avoids the compound index requirement
+      final messagesSnapshot = await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .where('senderId', isNotEqualTo: currentUserId)
+          .get()
+          .timeout(const Duration(seconds: 10));
+
+      // Filter for unseen messages in memory
+      final unseenMessages = messagesSnapshot.docs
+          .where((doc) => !(doc.data()['seen'] ?? false))
+          .toList();
+
+      return unseenMessages.length;
+    } catch (e) {
+      if (kDebugMode) debugPrint('HomeController: Error getting unread count for $chatId: $e');
+      return 0;
+    }
   }
 }

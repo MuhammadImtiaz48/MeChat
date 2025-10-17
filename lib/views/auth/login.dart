@@ -91,6 +91,29 @@ class LoginScreen extends StatelessWidget {
                           ),
                         )),
                     SizedBox(height: 16.h),
+                    Row(
+                      children: [
+                        Expanded(child: Divider(color: Colors.grey[400], thickness: 1)),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16.w),
+                          child: Text('OR', style: TextStyle(fontSize: 14.sp, color: Colors.grey[600])),
+                        ),
+                        Expanded(child: Divider(color: Colors.grey[400], thickness: 1)),
+                      ],
+                    ),
+                    SizedBox(height: 16.h),
+                    Obx(() => OutlinedButton.icon(
+                          onPressed: controller.loading.value ? null : controller.signInWithGoogle,
+                          icon: Image.asset('assets/images/google.png', height: 24.h, width: 24.w),
+                          label: Text('Continue with Google', style: TextStyle(fontSize: 16.sp, color: Colors.black87)),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: Size(double.infinity, 50.h),
+                            side: BorderSide(color: Colors.grey[300]!),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+                            backgroundColor: Colors.white,
+                          ),
+                        )),
+                    SizedBox(height: 16.h),
                     TextButton(
                       onPressed: () => Get.toNamed('/signup'),
                       child: Text('Don\'t have an account? Sign Up', style: TextStyle(fontSize: 14.sp, color: const Color(0xFF075E54))),

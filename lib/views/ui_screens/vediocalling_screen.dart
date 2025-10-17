@@ -11,6 +11,7 @@ class IncomingCallScreen extends StatelessWidget {
   final String callType;
   final String userId;
   final String userName;
+  final String callerId;
 
   const IncomingCallScreen({
     super.key,
@@ -18,13 +19,13 @@ class IncomingCallScreen extends StatelessWidget {
     required this.callId,
     required this.callType,
     required this.userId,
-    required this.userName, required callerId,
+    required this.userName,
+    required this.callerId,
   });
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
     final isTablet = screenWidth >= 600;
     final isSmallScreen = screenWidth < 360;
 

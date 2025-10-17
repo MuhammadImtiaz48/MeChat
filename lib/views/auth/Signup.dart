@@ -80,7 +80,11 @@ class SignupScreen extends StatelessWidget {
                     fillColor: Colors.grey[100],
                     prefixIcon: const Icon(Icons.lock, color: Color(0xFF075E54)),
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Confirm your password' : null,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) return 'Confirm your password';
+                    if (value.trim() != controller.passwordController.text.trim()) return 'Passwords do not match';
+                    return null;
+                  },
                 ),
                 SizedBox(height: 24.h),
                 Obx(() => controller.loading.value
@@ -95,6 +99,29 @@ class SignupScreen extends StatelessWidget {
                         ),
                         child: Text('Create Account', style: TextStyle(fontSize: 18.sp, color: Colors.white, fontWeight: FontWeight.bold)),
                       )),
+                SizedBox(height: 16.h),
+                Row(
+                  children: [
+                    Expanded(child: Divider(color: Colors.grey[400], thickness: 1)),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16.w),
+                      child: Text('OR', style: TextStyle(fontSize: 14.sp, color: Colors.grey[600])),
+                    ),
+                    Expanded(child: Divider(color: Colors.grey[400], thickness: 1)),
+                  ],
+                ),
+                SizedBox(height: 16.h),
+                Obx(() => OutlinedButton.icon(
+                      onPressed: controller.loading.value ? null : controller.signUpWithGoogle,
+                      icon: Image.asset('assets/images/google.png', height: 24.h, width: 24.w),
+                      label: Text('Continue with Google', style: TextStyle(fontSize: 16.sp, color: Colors.black87)),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: Size(double.infinity, 50.h),
+                        side: BorderSide(color: Colors.grey[300]!),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+                        backgroundColor: Colors.white,
+                      ),
+                    )),
                 SizedBox(height: 16.h),
                 TextButton(
                   onPressed: () => Get.toNamed('/login'),

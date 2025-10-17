@@ -14,10 +14,12 @@ import 'ringtone_service.dart';
 
 class NotificationService {
   static const _scopes = ['https://www.googleapis.com/auth/firebase.messaging'];
-  static final FlutterLocalNotificationsPlugin _localNotificationsPlugin = FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin _localNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
   static const String _channelId = 'chat_channel_v1';
   static const String _channelName = 'Chat Notifications';
-  static const String _methodChannel = 'com.example.flutter_application_1/notifications';
+  static const String _methodChannel =
+      'com.example.flutter_application_1/notifications';
   static String? _currentChatId;
 
   static void setCurrentChatId(String? chatId) {
@@ -32,8 +34,13 @@ class NotificationService {
   }) async {
     try {
       debugPrint('🔔 NotificationService: Initializing');
-      const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('launcher_icon');
-      const InitializationSettings initSettings = InitializationSettings(android: androidSettings);
+
+      // Use your launcher icon resource name here
+      const AndroidInitializationSettings androidSettings =
+AndroidInitializationSettings('@mipmap/launcher_icon');
+
+      const InitializationSettings initSettings =
+          InitializationSettings(android: androidSettings);
 
       await _localNotificationsPlugin
           .initialize(
@@ -41,9 +48,11 @@ class NotificationService {
             onDidReceiveNotificationResponse: (details) async {
               if (details.payload != null) {
                 try {
-                  final payloadData = jsonDecode(details.payload!) as Map<String, dynamic>;
+                  final payloadData =
+                      jsonDecode(details.payload!) as Map<String, dynamic>;
                   debugPrint('🔔 NotificationService: Notification tapped: $payloadData');
-                  await onNotificationTap(payloadData.cast<String, String>());
+                  await onNotificationTap(
+                      payloadData.map((k, v) => MapEntry(k.toString(), v.toString())));
                   if (payloadData['type'] == 'call') {
                     await RingtoneService.stopRingtone();
                   }
@@ -81,42 +90,62 @@ class NotificationService {
         provisional: false,
       );
 
+      // Foreground messages
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         if (kDebugMode) {
           debugPrint('🔔 NotificationService: Received foreground message: ${message.notification?.title}');
         }
-        if (message.data['chatId'] != _currentChatId && message.data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
-          showLocalNotification(
-            id: message.messageId?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
-            title: message.notification?.title ?? 'New Message',
-            body: message.notification?.body ?? 'You have a new message!',
-            payload: jsonEncode(message.data),
-            type: message.data['type'],
-            chatId: message.data['chatId'],
-          );
+        try {
+          final data = message.data;
+          if (data['chatId'] != _currentChatId &&
+              data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+            showLocalNotification(
+              id: message.messageId?.hashCode ??
+                  DateTime.now().millisecondsSinceEpoch,
+              title: message.notification?.title ?? 'New Message',
+              body: message.notification?.body ?? 'You have a new message!',
+              payload: jsonEncode(data),
+              type: data['type'],
+              chatId: data['chatId'],
+            );
+          }
+        } catch (e) {
+          debugPrint('⚠️ NotificationService: Error handling onMessage: $e');
         }
       });
 
+      // When app opened from background by tapping notification
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         if (kDebugMode) {
           debugPrint('🔔 NotificationService: Opened from background message: ${message.notification?.title}');
         }
-        if (message.data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
-          onNotificationTap(message.data.cast<String, String>());
-          if (message.data['type'] == 'call') {
-            RingtoneService.stopRingtone();
+        try {
+          final data = message.data;
+          if (data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+            onNotificationTap(data.map((k, v) => MapEntry(k.toString(), v.toString())));
+            if (data['type'] == 'call') {
+              RingtoneService.stopRingtone();
+            }
           }
+        } catch (e) {
+          debugPrint('⚠️ NotificationService: Error handling onMessageOpenedApp: $e');
         }
       });
 
+      // When app opened from terminated state via notification
       final initialMessage = await messaging.getInitialMessage();
-      if (initialMessage != null && initialMessage.data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+      if (initialMessage != null &&
+          initialMessage.data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
         if (kDebugMode) {
           debugPrint('🔔 NotificationService: Opened from terminated message: ${initialMessage.notification?.title}');
         }
-        onNotificationTap(initialMessage.data.cast<String, String>());
-        if (initialMessage.data['type'] == 'call') {
-          RingtoneService.stopRingtone();
+        try {
+          onNotificationTap(initialMessage.data.map((k, v) => MapEntry(k.toString(), v.toString())));
+          if (initialMessage.data['type'] == 'call') {
+            RingtoneService.stopRingtone();
+          }
+        } catch (e) {
+          debugPrint('⚠️ NotificationService: Error handling initialMessage: $e');
         }
       }
 
@@ -127,7 +156,8 @@ class NotificationService {
           if (kDebugMode) {
             debugPrint('🔔 NotificationService: Received native message: $data');
           }
-          if (data['chatId'] != _currentChatId && data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+          if (data['chatId'] != _currentChatId &&
+              data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
             showLocalNotification(
               id: data['messageId']?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
               title: data['title'] ?? 'New Message',
@@ -144,11 +174,17 @@ class NotificationService {
           }
           final user = FirebaseAuth.instance.currentUser;
           if (user != null) {
-            await FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .update({'fcmToken': token});
+            await FirebaseFirestore.instance.collection('users').doc(user.uid).update({'fcmToken': token});
           }
+        }
+      });
+
+      // Listen for token refresh
+      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+        debugPrint('🔔 NotificationService: FCM token refreshed: $newToken');
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          await FirebaseFirestore.instance.collection('users').doc(user.uid).update({'fcmToken': newToken});
         }
       });
 
@@ -178,10 +214,11 @@ class NotificationService {
         channelDescription: 'Chat messages & call notifications',
         importance: Importance.max,
         priority: Priority.high,
-        playSound: type != 'call',
+        playSound: true,
         sound: type == 'call' ? null : const RawResourceAndroidNotificationSound('default'),
         groupKey: id.toString(),
         fullScreenIntent: type == 'call',
+        enableVibration: true,
       );
 
       final NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
@@ -210,7 +247,7 @@ class NotificationService {
   static Future<Map<String, dynamic>> _loadServiceAccount() async {
     try {
       final data = await rootBundle.loadString('assets/notification_json.json').timeout(const Duration(seconds: 2));
-      return jsonDecode(data);
+      return jsonDecode(data) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('⚠️ NotificationService: Error loading service account: $e');
       rethrow;
@@ -232,11 +269,19 @@ class NotificationService {
     required String targetToken,
     required String title,
     required String body,
-    required Map<String, dynamic> payload, required String type, required String senderId, required String chatId, required String senderName, required String callType, required String callId, required Map data,
+    required Map<String, dynamic> payload,
+    required String type,
+    required String senderId,
+    required String chatId,
+    required String senderName,
+    required String callType,
+    required String callId,
+    required Map data,
   }) async {
     for (int i = 0; i < 3; i++) {
       try {
         debugPrint('🔔 NotificationService: Sending push notification to $targetToken (attempt ${i + 1})');
+
         final client = await _getAuthClient();
         final serviceAccount = await _loadServiceAccount();
         final projectId = serviceAccount["project_id"];
@@ -244,7 +289,8 @@ class NotificationService {
 
         final url = Uri.parse('https://fcm.googleapis.com/v1/projects/$projectId/messages:send');
 
-        final messageData = payload.map((key, value) => MapEntry(key, value.toString()));
+        // convert all data values to string (FCM data requires string values)
+        final messageData = payload.map((key, value) => MapEntry(key.toString(), value.toString()));
 
         final androidConfig = {
           'notification': {
@@ -253,7 +299,7 @@ class NotificationService {
             'channel_id': _channelId,
             'sound': payload['type'] == 'call' ? 'ringtone' : 'default',
           },
-          'data': messageData,
+          'priority': type == 'call' ? 'high' : 'normal',
         };
 
         final message = {
@@ -281,6 +327,35 @@ class NotificationService {
           return true;
         } else {
           debugPrint('❌ NotificationService: Notification failed: ${response.statusCode} => ${response.body}');
+
+          try {
+            final responseBody = jsonDecode(response.body);
+            final errorCode = responseBody['error']?['details']?[0]?['errorCode']?.toString();
+            if (errorCode == 'UNREGISTERED' && i < 2) {
+              debugPrint('⚠️ NotificationService: Token unregistered, attempting to refresh...');
+              await _refreshFcmTokenForUser(senderId);
+              final newToken = await _getRefreshedFcmToken(senderId);
+              if (newToken != null && newToken != targetToken) {
+                debugPrint('✅ NotificationService: Got new token, retrying with new token...');
+                return await sendPushNotification(
+                  targetToken: newToken,
+                  title: title,
+                  body: body,
+                  payload: payload,
+                  type: type,
+                  senderId: senderId,
+                  chatId: chatId,
+                  senderName: senderName,
+                  callType: callType,
+                  callId: callId,
+                  data: data,
+                );
+              }
+            }
+          } catch (_) {
+            // ignore parse errors
+          }
+
           if (i == 2) {
             _showErrorSnackbar('Failed to send notification: ${response.statusCode}');
             return false;
@@ -296,6 +371,30 @@ class NotificationService {
       }
     }
     return false;
+  }
+
+  static Future<void> _refreshFcmTokenForUser(String userId) async {
+    try {
+      debugPrint('🔔 NotificationService: Refreshing FCM token for user: $userId');
+      final messaging = FirebaseMessaging.instance;
+      final newToken = await messaging.getToken();
+      if (newToken != null) {
+        await FirebaseFirestore.instance.collection('users').doc(userId).update({'fcmToken': newToken});
+        debugPrint('✅ NotificationService: Updated FCM token for user: $userId');
+      }
+    } catch (e) {
+      debugPrint('⚠️ NotificationService: Error refreshing FCM token: $e');
+    }
+  }
+
+  static Future<String?> _getRefreshedFcmToken(String userId) async {
+    try {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      return userDoc.data()?['fcmToken']?.toString();
+    } catch (e) {
+      debugPrint('⚠️ NotificationService: Error getting refreshed token: $e');
+      return null;
+    }
   }
 
   static void _showErrorSnackbar(String message) {

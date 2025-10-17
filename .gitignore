@@ -35,6 +35,8 @@ migrate_working_dir/
 .pub/
 build/
 assets/
+.env/
+
 
 # Symbolication related
 

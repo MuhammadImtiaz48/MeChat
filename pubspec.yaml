@@ -43,6 +43,10 @@ dependencies:
   sqflite: ^2.3.3+1
   shimmer: ^3.0.0
   google_fonts: ^6.0.0
+  flutter_dotenv: ^6.0.0
+  cloudinary_public: ^0.23.1
+  async: ^2.11.0
+  
 
 dev_dependencies:
   flutter_test:
@@ -65,3 +69,4 @@ flutter:
     - assets/sounds/ringtone.mp3
     - assets/notification_json.json
     - assets/icon/launcher_icon.png
+    - .env

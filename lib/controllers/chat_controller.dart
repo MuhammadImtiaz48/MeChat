@@ -9,8 +9,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:imtiaz/controllers/app_controller.dart';
 import 'package:imtiaz/firebase_Services/notification_services.dart';
+import 'package:imtiaz/models/massagesmodel.dart';
 import 'package:imtiaz/models/userchat.dart';
 
 class ChatController extends GetxController {
@@ -211,17 +213,25 @@ class ChatController extends GetxController {
             .timeout(const Duration(seconds: 5));
         if (userDoc.exists) {
           final fcmToken = userDoc.data()!['fcmToken']?.toString();
-          if (fcmToken != null && fcmToken.isNotEmpty) {
+          if (fcmToken != null && fcmToken.isNotEmpty && fcmToken.length > 100) {
             if (kDebugMode) {
-              debugPrint('✅ ChatController: Retrieved receiver FCM token for user=${user.uid}');
+              debugPrint('✅ ChatController: Retrieved receiver FCM token for user=${user.uid}: ${fcmToken.substring(0, 20)}...');
             }
             return fcmToken;
+          } else {
+            if (kDebugMode) {
+              debugPrint('⚠️ ChatController: Invalid FCM token found for user=${user.uid}: ${fcmToken?.length ?? 0} chars');
+            }
+            // Try to refresh the token
+            await _refreshReceiverFcmToken();
+            await Future.delayed(const Duration(seconds: 1));
           }
+        } else {
+          if (kDebugMode) {
+            debugPrint('⚠️ ChatController: User document not found for user=${user.uid}');
+          }
+          return null;
         }
-        if (kDebugMode) {
-          debugPrint('⚠️ ChatController: No valid FCM token found for user=${user.uid}');
-        }
-        return null;
       } catch (e) {
         if (kDebugMode) {
           debugPrint('❌ ChatController: Error fetching receiver FCM token (attempt ${i + 1}): $e');
@@ -235,8 +245,47 @@ class ChatController extends GetxController {
     return null;
   }
 
-  Future<void> sendMessage(String message) async {
-    if (message.trim().isEmpty || !isOnline.value) {
+  Future<void> _refreshReceiverFcmToken() async {
+    try {
+      if (kDebugMode) {
+        debugPrint('🔄 ChatController: Attempting to refresh FCM token for receiver=${user.uid}');
+      }
+
+      // This is a workaround - we can't directly refresh another user's token
+      // But we can check if the current user has a valid token and suggest the receiver to refresh
+      final currentUser = _auth.currentUser;
+      if (currentUser != null && currentUser.uid == user.uid) {
+        // If this is the current user, we can refresh their own token
+        final messaging = FirebaseMessaging.instance;
+        final newToken = await messaging.getToken();
+        if (newToken != null && newToken.isNotEmpty) {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .update({'fcmToken': newToken, 'lastActive': FieldValue.serverTimestamp()});
+          if (kDebugMode) {
+            debugPrint('✅ ChatController: Refreshed FCM token for current user: ${newToken.substring(0, 20)}...');
+          }
+        }
+      } else {
+        // For other users, we can only update the lastActive timestamp to trigger any background refresh
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update({'lastActive': FieldValue.serverTimestamp()});
+        if (kDebugMode) {
+          debugPrint('⚠️ ChatController: Updated lastActive for receiver=${user.uid}, token refresh not possible');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ ChatController: Error refreshing receiver FCM token: $e');
+      }
+    }
+  }
+
+  Future<void> sendMessage(String message, {MessageType type = MessageType.text, String? mediaUrl, String? fileName, int? fileSize}) async {
+    if ((message.trim().isEmpty && type == MessageType.text) || !isOnline.value) {
       if (kDebugMode) {
         debugPrint('❌ ChatController: Message empty or offline, cannot send');
       }
@@ -272,9 +321,13 @@ class ChatController extends GetxController {
           final msgData = {
             'senderId': currentUser.uid,
             'receiverId': user.uid,
-            'message': message,
+            'text': message,
             'timestamp': FieldValue.serverTimestamp(),
             'seen': false,
+            'type': type.toString().split('.').last,
+            if (mediaUrl != null) 'mediaUrl': mediaUrl,
+            if (fileName != null) 'fileName': fileName,
+            if (fileSize != null) 'fileSize': fileSize,
           };
           if (kDebugMode) {
             debugPrint('ChatController: Sending message to Firestore: $msgData');
@@ -285,37 +338,64 @@ class ChatController extends GetxController {
               .collection('messages')
               .add(msgData)
               .timeout(const Duration(seconds: 10));
+
+          // Update chat document with last message info
+          String lastMessageText = message;
+          if (type == MessageType.image) {
+            lastMessageText = '📷 Photo';
+          } else if (type == MessageType.video) {
+            lastMessageText = '🎥 Video';
+          } else if (type == MessageType.audio) {
+            lastMessageText = '🎵 Voice message';
+          } else if (type == MessageType.file) {
+            lastMessageText = '📎 File';
+          }
+
           await FirebaseFirestore.instance
               .collection('chats')
               .doc(chatRoomId)
               .set({
-                'lastMessage': message,
+                'lastMessage': lastMessageText,
                 'lastMessageTime': FieldValue.serverTimestamp(),
                 'participants': [currentUser.uid, user.uid],
                 'typing_${user.uid}': false,
               }, SetOptions(merge: true))
               .timeout(const Duration(seconds: 10));
+
           final cachedMsg = {
             'senderId': msgData['senderId'],
             'receiverId': msgData['receiverId'],
-            'message': msgData['message'],
+            'text': msgData['text'],
             'timestamp': DateTime.now().toIso8601String(),
             'seen': false,
+            'type': msgData['type'],
+            if (mediaUrl != null) 'mediaUrl': mediaUrl,
+            if (fileName != null) 'fileName': fileName,
+            if (fileSize != null) 'fileSize': fileSize,
           };
           cachedMessages.insert(0, cachedMsg);
           await cacheMessages(cachedMessages.toList());
 
-          if (receiverFcmToken != null) {
+          if (receiverFcmToken != null && receiverFcmToken.isNotEmpty) {
             final success = await NotificationService.sendPushNotification(
               targetToken: receiverFcmToken,
               title: myName.value.isNotEmpty ? myName.value : 'User',
-              body: message.length > 50 ? '${message.substring(0, 47)}...' : message,
+              body: lastMessageText,
               payload: {
                 'type': 'message',
                 'chatId': user.uid,
                 'senderId': currentUser.uid,
                 'senderName': myName.value.isNotEmpty ? myName.value : 'User',
-              }, type: '', senderId: '', chatId: '', senderName: '', callType: '', callId: '', data: {},
+                'messageType': type.toString().split('.').last,
+                'timestamp': DateTime.now().toIso8601String(),
+              },
+              type: 'message',
+              senderId: currentUser.uid,
+              chatId: user.uid,
+              senderName: myName.value.isNotEmpty ? myName.value : 'User',
+              callType: '',
+              callId: '',
+              data: {},
             );
             if (success) {
               if (kDebugMode) {
@@ -323,12 +403,12 @@ class ChatController extends GetxController {
               }
             } else {
               if (kDebugMode) {
-                debugPrint('⚠️ ChatController: Failed to send message notification to receiver=${user.uid}');
+                debugPrint('❌ ChatController: Failed to send message notification to receiver=${user.uid}');
               }
             }
           } else {
             if (kDebugMode) {
-              debugPrint('⚠️ ChatController: No FCM token for receiver=${user.uid}, message notification skipped');
+              debugPrint('⚠️ ChatController: No valid FCM token for receiver=${user.uid}, message notification skipped');
             }
           }
 
@@ -532,7 +612,7 @@ class ChatController extends GetxController {
         if (kDebugMode) {
           debugPrint('ChatController: Starting ${isVideo ? 'video' : 'voice'} call with ${user.uid}');
         }
-        if (receiverFcmToken != null) {
+        if (receiverFcmToken != null && receiverFcmToken.isNotEmpty) {
           final success = await NotificationService.sendPushNotification(
             targetToken: receiverFcmToken,
             title: isVideo ? 'Incoming Video Call' : 'Incoming Voice Call',
@@ -544,7 +624,15 @@ class ChatController extends GetxController {
               'senderName': myName.value.isNotEmpty ? myName.value : 'User',
               'callId': chatRoomId,
               'callType': isVideo ? 'video' : 'voice',
-            }, type: '', senderId: '', chatId: '', senderName: '', callType: '', callId: '', data: {},
+              'timestamp': DateTime.now().toIso8601String(),
+            },
+            type: 'call',
+            senderId: _auth.currentUser!.uid,
+            chatId: user.uid,
+            senderName: myName.value.isNotEmpty ? myName.value : 'User',
+            callType: isVideo ? 'video' : 'voice',
+            callId: chatRoomId,
+            data: {},
           );
           if (success) {
             if (kDebugMode) {
@@ -552,12 +640,12 @@ class ChatController extends GetxController {
             }
           } else {
             if (kDebugMode) {
-              debugPrint('⚠️ ChatController: Failed to send call notification to receiver=${user.uid}');
+              debugPrint('❌ ChatController: Failed to send call notification to receiver=${user.uid}');
             }
           }
         } else {
           if (kDebugMode) {
-            debugPrint('⚠️ ChatController: No FCM token for receiver=${user.uid}, call notification skipped');
+            debugPrint('⚠️ ChatController: No valid FCM token for receiver=${user.uid}, call notification skipped');
           }
         }
 

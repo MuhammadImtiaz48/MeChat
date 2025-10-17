@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -7,9 +8,13 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:imtiaz/controllers/app_controller.dart';
 import 'package:imtiaz/controllers/chat_controller.dart';
+import 'package:imtiaz/firebase_Services/cloudinary_service.dart';
 import 'package:imtiaz/firebase_Services/notification_services.dart';
+import 'package:imtiaz/models/massagesmodel.dart';
 import 'package:imtiaz/models/userchat.dart';
 import 'package:imtiaz/views/ui_screens/user_profile.dart';
 import 'package:imtiaz/widgets/chatmaasgeCard.dart';
@@ -36,8 +41,10 @@ class _ChatScreenState extends State<ChatScreen> {
   late final FocusNode focusNode;
   late final ChatController controller;
   late final AppController appController;
+  late final CloudinaryService cloudinaryService;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _isCalling = false;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -76,9 +83,11 @@ class _ChatScreenState extends State<ChatScreen> {
     scrollController = ScrollController();
     focusNode = FocusNode();
     appController = Get.find<AppController>();
+    cloudinaryService = CloudinaryService();
     _initializeConnectivity();
     SchedulerBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
+
 
   Future<void> _initializeConnectivity() async {
     try {
@@ -136,6 +145,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _showSnackBar(String title, String message, Color backgroundColor) {
     if (Get.isSnackbarOpen) Get.closeAllSnackbars();
+
     Get.snackbar(
       title,
       message,
@@ -163,6 +173,196 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  void _showAttachmentOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(20.r),
+            topRight: Radius.circular(20.r),
+          ),
+        ),
+        padding: EdgeInsets.all(20.w),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Share',
+              style: GoogleFonts.poppins(
+                fontSize: 18.sp,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            SizedBox(height: 20.h),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildAttachmentOption(
+                  icon: Icons.photo,
+                  label: 'Gallery',
+                  color: Colors.green,
+                  onTap: () => _pickImage(ImageSource.gallery),
+                ),
+                _buildAttachmentOption(
+                  icon: Icons.camera_alt,
+                  label: 'Camera',
+                  color: Colors.blue,
+                  onTap: () => _pickImage(ImageSource.camera),
+                ),
+                _buildAttachmentOption(
+                  icon: Icons.videocam,
+                  label: 'Video',
+                  color: Colors.red,
+                  onTap: () => _pickVideo(),
+                ),
+                _buildAttachmentOption(
+                  icon: Icons.insert_drive_file,
+                  label: 'Document',
+                  color: Colors.orange,
+                  onTap: () => _pickDocument(),
+                ),
+              ],
+            ),
+            SizedBox(height: 20.h),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAttachmentOption({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: () {
+        Get.back();
+        onTap();
+      },
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 30.r,
+            backgroundColor: color.withValues(alpha: 0.1),
+            child: Icon(icon, color: color, size: 24.w),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 12.sp,
+              color: Colors.black87,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(source: source, imageQuality: 80);
+
+      if (pickedFile != null) {
+        await _uploadAndSendMedia(File(pickedFile.path), MessageType.image);
+      }
+    } catch (e) {
+      _showSnackBar('Error', 'Failed to pick image: $e', Colors.red);
+    }
+  }
+
+  Future<void> _pickVideo() async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickVideo(source: ImageSource.gallery);
+
+      if (pickedFile != null) {
+        await _uploadAndSendMedia(File(pickedFile.path), MessageType.video);
+      }
+    } catch (e) {
+      _showSnackBar('Error', 'Failed to pick video: $e', Colors.red);
+    }
+  }
+
+  Future<void> _pickDocument() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.single.path != null) {
+        final file = File(result.files.single.path!);
+        await _uploadAndSendMedia(file, MessageType.file, fileName: result.files.single.name, message: msgController.text.trim());
+      }
+    } catch (e) {
+      _showSnackBar('Error', 'Failed to pick document: $e', Colors.red);
+    }
+  }
+
+  Future<void> _uploadAndSendMedia(File file, MessageType type, {String? fileName, String? message}) async {
+    if (!controller.isOnline.value) {
+      _showSnackBar('Offline', 'Cannot send media while offline', Colors.orange);
+      return;
+    }
+
+    setState(() => _isUploading = true);
+
+    try {
+      String? mediaUrl;
+      String? finalFileName = fileName;
+
+      switch (type) {
+        case MessageType.image:
+          mediaUrl = await cloudinaryService.uploadImageToCloudinary(file);
+          break;
+        case MessageType.video:
+          mediaUrl = await cloudinaryService.uploadVideoToCloudinary(file);
+          break;
+        case MessageType.file:
+          mediaUrl = await cloudinaryService.uploadFileToCloudinary(file);
+          break;
+        default:
+          break;
+      }
+
+      if (mediaUrl != null) {
+        final messageText = message ?? msgController.text.trim();
+        final messageModel = MessageModel(
+          senderId: FirebaseAuth.instance.currentUser!.uid,
+          text: messageText,
+          timestamp: DateTime.now(),
+          type: type,
+          mediaUrl: mediaUrl,
+          fileName: finalFileName,
+          fileSize: await file.length(),
+        );
+
+        await FirebaseFirestore.instance
+            .collection('chats')
+            .doc(controller.chatRoomId)
+            .collection('messages')
+            .add(messageModel.toMap());
+
+        msgController.clear();
+        _scrollToBottom();
+        _showSnackBar('Success', '${type.toString().split('.').last} sent!', Colors.green);
+      } else {
+        _showSnackBar('Error', 'Failed to upload ${type.toString().split('.').last}', Colors.red);
+      }
+    } catch (e) {
+      _showSnackBar('Error', 'Failed to send media: $e', Colors.red);
+    } finally {
+      setState(() => _isUploading = false);
+    }
+  }
   @override
   Widget build(BuildContext context) {
     return ScreenUtilInit(
@@ -195,11 +395,7 @@ class _ChatScreenState extends State<ChatScreen> {
               toolbarHeight: appBarHeight,
               flexibleSpace: Container(
                 decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF075E54), Color.fromARGB(255, 37, 224, 202)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
+                  color: Color(0xFF075E54),
                 ),
               ),
               leadingWidth: isSmallScreen ? 80.w : isTablet ? 100.w : 90.w,
@@ -484,11 +680,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           body: Container(
             decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFFECE5DD), Color(0xFFD8D1C2)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
+              color: Color(0xFFECE5DD),
             ),
             child: Column(
               children: [
@@ -549,11 +741,18 @@ class _ChatScreenState extends State<ChatScreen> {
                                   currentUserId: FirebaseAuth.instance.currentUser!.uid,
                                   senderId: msg['senderId'],
                                   senderName: isMe ? controller.myName.value : widget.user.name,
-                                  message: msg['message'],
+                                  message: msg['text'] ?? msg['message'] ?? '',
                                   time: time,
                                   seen: msg['seen'] ?? false,
                                   showSeen: isMe,
                                   maxWidth: screenWidth * 0.75,
+                                  type: MessageType.values.firstWhere(
+                                    (e) => e.toString() == 'MessageType.${msg['type'] ?? 'text'}',
+                                    orElse: () => MessageType.text,
+                                  ),
+                                  mediaUrl: msg['mediaUrl'],
+                                  fileName: msg['fileName'],
+                                  fileSize: msg['fileSize'],
                                 );
                               },
                             );
@@ -610,11 +809,18 @@ class _ChatScreenState extends State<ChatScreen> {
                                 currentUserId: FirebaseAuth.instance.currentUser!.uid,
                                 senderId: msg['senderId'],
                                 senderName: isMe ? controller.myName.value : widget.user.name,
-                                message: msg['message'],
+                                message: msg['text'] ?? '',
                                 time: (msg['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
                                 seen: msg['seen'] ?? false,
                                 showSeen: isMe,
                                 maxWidth: screenWidth * 0.75,
+                                type: MessageType.values.firstWhere(
+                                  (e) => e.toString() == 'MessageType.${msg['type'] ?? 'text'}',
+                                  orElse: () => MessageType.text,
+                                ),
+                                mediaUrl: msg['mediaUrl'],
+                                fileName: msg['fileName'],
+                                fileSize: msg['fileSize'],
                               );
                             },
                           );
@@ -633,13 +839,26 @@ class _ChatScreenState extends State<ChatScreen> {
                             return Container(
                               padding: EdgeInsets.symmetric(horizontal: paddingHorizontal + 6.w, vertical: paddingVertical),
                               color: const Color(0xFFECE5DD),
-                              child: Text(
-                                'Typing...',
-                                style: GoogleFonts.poppins(
-                                  fontStyle: FontStyle.italic,
-                                  color: const Color(0xFF075E54),
-                                  fontSize: fontSizeTyping,
-                                ),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 20.w,
+                                    height: 20.h,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.w,
+                                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF25D366)),
+                                    ),
+                                  ),
+                                  SizedBox(width: 8.w),
+                                  Text(
+                                    'Typing...',
+                                    style: GoogleFonts.poppins(
+                                      fontStyle: FontStyle.italic,
+                                      color: const Color(0xFF25D366),
+                                      fontSize: fontSizeTyping,
+                                    ),
+                                  ),
+                                ],
                               ),
                             );
                           }
@@ -649,22 +868,25 @@ class _ChatScreenState extends State<ChatScreen> {
                     )),
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: paddingHorizontal, vertical: paddingVertical),
-                  color: Colors.white,
+                  color: const Color(0xFFECE5DD),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
+                      IconButton(
+                        icon: Icon(
+                          Icons.attach_file,
+                          color: const Color(0xFF075E54),
+                          size: isTablet ? 24.w : 20.w,
+                        ),
+                        onPressed: _showAttachmentOptions,
+                        tooltip: 'Attach',
+                      ),
                       Expanded(
                         child: Container(
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(25.r),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 4.r,
-                                offset: Offset(0, 2.h),
-                              ),
-                            ],
+                            border: Border.all(color: Colors.grey[300]!, width: 1),
                           ),
                           child: ConstrainedBox(
                             constraints: BoxConstraints(maxHeight: isTallScreen ? 100.h : 80.h),
@@ -674,7 +896,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               enabled: controller.isOnline.value,
                               decoration: InputDecoration(
                                 hintText: controller.isOnline.value ? 'Type a message' : 'Offline: Cannot send messages',
-                                hintStyle: GoogleFonts.poppins(color: Colors.grey[600], fontSize: isTablet ? 15.sp : 13.sp),
+                                hintStyle: GoogleFonts.poppins(color: Colors.grey[500], fontSize: isTablet ? 15.sp : 13.sp),
                                 border: InputBorder.none,
                                 contentPadding: EdgeInsets.symmetric(horizontal: paddingHorizontal + 10.w, vertical: paddingVertical + 6.h),
                               ),
@@ -689,22 +911,31 @@ class _ChatScreenState extends State<ChatScreen> {
                       SizedBox(width: paddingHorizontal),
                       CircleAvatar(
                         radius: isSmallScreen ? 22.r : isTablet ? 26.r : 24.r,
-                        backgroundColor: controller.isSending.value || !controller.isOnline.value
+                        backgroundColor: _isUploading || controller.isSending.value || !controller.isOnline.value
                             ? Colors.grey[400]
-                            : const Color(0xFF075E54),
-                        child: IconButton(
-                          icon: Icon(Icons.send, color: Colors.white, size: isTablet ? 16.w : 14.w),
-                          onPressed: controller.isSending.value || !controller.isOnline.value
-                              ? null
-                              : () {
-                                  if (msgController.text.trim().isNotEmpty) {
-                                    controller.sendMessage(msgController.text);
-                                    msgController.clear();
-                                    _scrollToBottom();
-                                  }
-                                },
-                          tooltip: 'Send',
-                        ),
+                            : const Color(0xFF25D366),
+                        child: _isUploading
+                            ? SizedBox(
+                                width: isTablet ? 16.w : 14.w,
+                                height: isTablet ? 16.w : 14.w,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.w,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : IconButton(
+                                icon: Icon(Icons.send, color: Colors.white, size: isTablet ? 16.w : 14.w),
+                                onPressed: controller.isSending.value || !controller.isOnline.value || _isUploading
+                                    ? null
+                                    : () {
+                                        if (msgController.text.trim().isNotEmpty) {
+                                          controller.sendMessage(msgController.text);
+                                          msgController.clear();
+                                          _scrollToBottom();
+                                        }
+                                      },
+                                tooltip: 'Send',
+                              ),
                       ),
                     ],
                   ),

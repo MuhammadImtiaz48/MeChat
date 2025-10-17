@@ -257,7 +257,7 @@ class AppController extends GetxController {
               ),
             ),
           ),
-        ).timeout(const Duration(seconds: 10));
+        ).timeout(const Duration(seconds: 15));
         isZegoInitialized.value = true;
         debugPrint('✅ AppController: Zego initialized for user: uid=${user.uid}, name=$name');
         return;

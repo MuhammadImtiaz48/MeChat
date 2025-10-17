@@ -26,7 +26,9 @@ class CallService {
             callerName: callerName,
             callerId: callerId,
             callId: callId,
-            callType: callType, userId: '', userName: '',
+            callType: callType,
+            userId: '',
+            userName: '',
           ))?.then((_) {
         _isCallScreenOpen = false;
         RingtoneService.stopRingtone();

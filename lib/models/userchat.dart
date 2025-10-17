@@ -8,8 +8,10 @@ class UserchatModel {
   final String image;
   final String fcmToken;
   final String profilePic;
-  final DateTime? lastActive; // Parsed from Timestamp or String
-  final DateTime? lastMessageTime; // For chat sorting, parsed from Timestamp or String
+  final DateTime? lastActive;
+  final DateTime? lastMessageTime;
+  final String lastMessage;
+  final int unreadCount;
 
   UserchatModel({
     required this.uid,
@@ -20,12 +22,13 @@ class UserchatModel {
     required this.profilePic,
     this.lastActive,
     this.lastMessageTime,
+    this.lastMessage = '',
+    this.unreadCount = 0,
   });
 
   factory UserchatModel.fromMap(Map<String, dynamic> map) {
-    // Validate required fields with fallbacks
     final String uid = map['uid']?.toString().trim() ?? '';
-    final String name = map['name']?.toString().trim().isNotEmpty == true
+    final String name = (map['name']?.toString().trim().isNotEmpty == true)
         ? map['name'].toString().trim()
         : 'Unknown';
     final String email = map['email']?.toString().trim() ?? '';
@@ -33,52 +36,34 @@ class UserchatModel {
     final String fcmToken = map['fcmToken']?.toString().trim() ?? '';
     final String profilePic = map['profilePic']?.toString().trim() ?? '';
 
-    // Parse lastActive
     DateTime? lastActive;
     if (map['lastActive'] != null) {
       try {
         if (map['lastActive'] is Timestamp) {
           lastActive = (map['lastActive'] as Timestamp).toDate();
         } else if (map['lastActive'] is String) {
-          lastActive = DateTime.tryParse(map['lastActive'] as String);
-        } else {
-          if (kDebugMode) {
-            debugPrint('UserchatModel: Invalid lastActive format for uid=$uid: ${map['lastActive'].runtimeType}');
-          }
+          lastActive = DateTime.tryParse(map['lastActive']);
         }
       } catch (e) {
-        if (kDebugMode) {
-          debugPrint('UserchatModel: Error parsing lastActive for uid=$uid: $e');
-        }
+        if (kDebugMode) debugPrint('Error parsing lastActive for uid=$uid: $e');
       }
     }
 
-    // Parse lastMessageTime
     DateTime? lastMessageTime;
     if (map['lastMessageTime'] != null) {
       try {
         if (map['lastMessageTime'] is Timestamp) {
           lastMessageTime = (map['lastMessageTime'] as Timestamp).toDate();
         } else if (map['lastMessageTime'] is String) {
-          lastMessageTime = DateTime.tryParse(map['lastMessageTime'] as String);
-        } else {
-          if (kDebugMode) {
-            debugPrint('UserchatModel: Invalid lastMessageTime format for uid=$uid: ${map['lastMessageTime'].runtimeType}');
-          }
+          lastMessageTime = DateTime.tryParse(map['lastMessageTime']);
         }
       } catch (e) {
-        if (kDebugMode) {
-          debugPrint('UserchatModel: Error parsing lastMessageTime for uid=$uid: $e');
-        }
+        if (kDebugMode) debugPrint('Error parsing lastMessageTime for uid=$uid: $e');
       }
     }
 
-    // Validate uid
-    if (uid.isEmpty) {
-      if (kDebugMode) {
-        debugPrint('UserchatModel: Warning: Empty UID in map=$map');
-      }
-    }
+    final String lastMessage = map['lastMessage']?.toString() ?? '';
+    final int unreadCount = map['unreadCount'] ?? 0;
 
     return UserchatModel(
       uid: uid,
@@ -89,9 +74,38 @@ class UserchatModel {
       profilePic: profilePic,
       lastActive: lastActive,
       lastMessageTime: lastMessageTime,
+      lastMessage: lastMessage,
+      unreadCount: unreadCount,
     );
   }
 
+  /// ✅ Never sends empty fields to Firestore
+  Map<String, dynamic> toFirestore({bool updateOnly = false}) {
+    final Map<String, dynamic> data = {};
+
+    // Only include fields that have meaningful values (avoids overwriting)
+    if (uid.isNotEmpty) data['uid'] = uid;
+    if (name.isNotEmpty) data['name'] = name;
+    if (email.isNotEmpty) data['email'] = email;
+    if (image.isNotEmpty) data['image'] = image;
+    if (fcmToken.isNotEmpty) data['fcmToken'] = fcmToken;
+    if (profilePic.isNotEmpty) data['profilePic'] = profilePic;
+
+    // Add timestamps
+    if (lastActive != null) {
+      data['lastActive'] = Timestamp.fromDate(lastActive!);
+    } else if (!updateOnly) {
+      data['lastActive'] = FieldValue.serverTimestamp();
+    }
+
+    if (lastMessageTime != null) {
+      data['lastMessageTime'] = Timestamp.fromDate(lastMessageTime!);
+    }
+
+    return data;
+  }
+
+  /// For local or JSON conversions
   Map<String, dynamic> toMap() {
     return {
       'uid': uid,
@@ -100,26 +114,13 @@ class UserchatModel {
       'image': image,
       'fcmToken': fcmToken,
       'profilePic': profilePic,
-      'lastActive': lastActive?.toIso8601String(), // Convert to ISO 8601 string for JSON
-      'lastMessageTime': lastMessageTime?.toIso8601String(), // Convert to ISO 8601 string for JSON
+      'lastActive': lastActive?.toIso8601String(),
+      'lastMessageTime': lastMessageTime?.toIso8601String(),
+      'lastMessage': lastMessage,
+      'unreadCount': unreadCount,
     };
   }
 
-  // For Firestore writes, where FieldValue is needed for new timestamps
-  Map<String, dynamic> toFirestore() {
-    return {
-      'uid': uid,
-      'name': name,
-      'email': email,
-      'image': image,
-      'fcmToken': fcmToken,
-      'profilePic': profilePic,
-      'lastActive': lastActive != null ? Timestamp.fromDate(lastActive!) : FieldValue.serverTimestamp(),
-      'lastMessageTime': lastMessageTime != null ? Timestamp.fromDate(lastMessageTime!) : null,
-    };
-  }
-
-  // Utility method for updating fields
   UserchatModel copyWith({
     String? uid,
     String? name,
@@ -129,6 +130,8 @@ class UserchatModel {
     String? profilePic,
     DateTime? lastActive,
     DateTime? lastMessageTime,
+    String? lastMessage,
+    int? unreadCount,
   }) {
     return UserchatModel(
       uid: uid ?? this.uid,
@@ -139,19 +142,19 @@ class UserchatModel {
       profilePic: profilePic ?? this.profilePic,
       lastActive: lastActive ?? this.lastActive,
       lastMessageTime: lastMessageTime ?? this.lastMessageTime,
+      lastMessage: lastMessage ?? this.lastMessage,
+      unreadCount: unreadCount ?? this.unreadCount,
     );
   }
 
   @override
-  String toString() {
-    return 'UserchatModel(uid: $uid, name: $name, email: $email, lastActive: $lastActive, lastMessageTime: $lastMessageTime)';
-  }
+  String toString() =>
+      'UserchatModel(uid: $uid, name: $name, profilePic: $profilePic, lastActive: $lastActive)';
 
   @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is UserchatModel && other.uid == uid;
-  }
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is UserchatModel && other.uid == uid);
 
   @override
   int get hashCode => uid.hashCode;

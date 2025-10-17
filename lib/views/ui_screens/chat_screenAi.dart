@@ -128,13 +128,9 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
         elevation: 0,
       ),
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.grey[100]!, Colors.white],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
+        color: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF121212)
+            : const Color(0xFFECE5DD),
         child: Column(
           children: [
             Expanded(
@@ -159,15 +155,21 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
                               maxWidth: MediaQuery.of(context).size.width * 0.75,
                             ),
                             decoration: BoxDecoration(
-                              color: isUser ? const Color(0xFF075E54) : Colors.white,
+                              color: isUser
+                                  ? const Color(0xFF075E54)
+                                  : Theme.of(context).brightness == Brightness.dark
+                                      ? const Color(0xFF1E1E1E)
+                                      : Colors.white,
                               borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.1),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
+                              boxShadow: Theme.of(context).brightness == Brightness.dark
+                                  ? null
+                                  : [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.1),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
                             ),
                             padding: const EdgeInsets.all(12),
                             child: isUser
@@ -181,7 +183,9 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
                                 : SelectableText(
                                     msg["text"],
                                     style: GoogleFonts.poppins(
-                                      color: Colors.black87,
+                                      color: Theme.of(context).brightness == Brightness.dark
+                                          ? Colors.white70
+                                          : Colors.black87,
                                       fontSize: 16,
                                     ),
                                   ),
@@ -245,14 +249,18 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF1E1E1E)
+                    : Colors.white,
+                boxShadow: Theme.of(context).brightness == Brightness.dark
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, -2),
+                        ),
+                      ],
               ),
               child: Row(
                 children: [
@@ -267,16 +275,27 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _controller,
-                      style: GoogleFonts.poppins(fontSize: 16),
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white70
+                            : Colors.black87,
+                      ),
                       decoration: InputDecoration(
                         hintText: "Type a message",
-                        hintStyle: GoogleFonts.poppins(color: Colors.grey[500]),
+                        hintStyle: GoogleFonts.poppins(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.grey[400]
+                              : Colors.grey[500],
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(25),
                           borderSide: BorderSide.none,
                         ),
                         filled: true,
-                        fillColor: Colors.grey[100],
+                        fillColor: Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.grey[100],
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 10,

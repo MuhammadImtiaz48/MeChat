@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -19,6 +20,7 @@ import 'package:imtiaz/views/ui_screens/chat_screenAi.dart';
 import 'package:imtiaz/views/ui_screens/home.dart';
 import 'package:imtiaz/views/ui_screens/splash.dart';
 import 'package:imtiaz/views/ui_screens/user_profile.dart';
+import 'package:imtiaz/views/ui_screens/users_list_screen.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
 
@@ -48,6 +50,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+ 
 
   try {
     await _initializeFirebase();
@@ -150,6 +153,7 @@ class MyApp extends StatelessWidget {
         navigatorKey: navigatorKey,
         title: 'MeChat',
         theme: ThemeData(
+          brightness: Brightness.light,
           primaryColor: const Color(0xFF075E54),
           colorScheme: ColorScheme.fromSwatch().copyWith(
             secondary: const Color(0xFF25D366),
@@ -169,6 +173,29 @@ class MyApp extends StatelessWidget {
             bodySmall: GoogleFonts.poppins(fontSize: 14.sp, color: Colors.grey[600]),
           ),
         ),
+        darkTheme: ThemeData(
+          brightness: Brightness.dark,
+          primaryColor: const Color(0xFF075E54),
+          colorScheme: ColorScheme.fromSwatch().copyWith(
+            brightness: Brightness.dark,
+            secondary: const Color(0xFF25D366),
+          ),
+          scaffoldBackgroundColor: const Color(0xFF121212),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF075E54),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+              padding: EdgeInsets.symmetric(horizontal: 40.w, vertical: 16.h),
+            ),
+          ),
+          textTheme: TextTheme(
+            bodyMedium: GoogleFonts.poppins(fontSize: 16.sp, color: Colors.white70),
+            titleLarge: GoogleFonts.poppins(fontSize: 28.sp, fontWeight: FontWeight.bold, color: const Color(0xFF25D366)),
+            bodySmall: GoogleFonts.poppins(fontSize: 14.sp, color: Colors.grey[400]),
+          ),
+        ),
+        themeMode: ThemeMode.system,
         initialRoute: '/splash',
         getPages: [
           GetPage(name: '/splash', page: () => const SplashScreen()),
@@ -183,6 +210,7 @@ class MyApp extends StatelessWidget {
               return HomeScreen(userName: controller.cachedUserData['name']?.toString().trim() ?? 'Guest');
             },
           ),
+          GetPage(name: '/users_list', page: () => const UsersListScreen()),
           GetPage(name: '/gemini_chat', page: () => const GeminiChatScreen()),
           GetPage(
             name: '/chat',
