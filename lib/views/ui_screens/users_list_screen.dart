@@ -12,9 +12,10 @@ class UsersListScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = Get.put(UsersListController());
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFECE5DD),
+      backgroundColor: isDarkMode ? const Color(0xFF0B141A) : const Color(0xFFECE5DD),
       appBar: AppBar(
         backgroundColor: const Color(0xFF075E54),
         elevation: 0,
@@ -40,15 +41,15 @@ class UsersListScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            _buildSearchField(controller),
+            _buildSearchField(controller, context),
             Expanded(
               child: Obx(() {
                 if (controller.loadingUsers.value) {
-                  return _buildLoadingState();
+                  return _buildLoadingState(context);
                 }
 
                 if (controller.filteredUsers.isEmpty) {
-                  return _buildEmptyState(controller);
+                  return _buildEmptyState(controller, context);
                 }
 
                 return _buildUsersList(controller);
@@ -60,10 +61,10 @@ class UsersListScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSearchField(UsersListController controller) {
+  Widget _buildSearchField(UsersListController controller, BuildContext context) {
     return Obx(() => controller.isSearching.value
         ? Container(
-            color: Colors.white,
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white,
             padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
             child: TextField(
               controller: controller.searchController,
@@ -75,7 +76,7 @@ class UsersListScreen extends StatelessWidget {
                 ),
                 prefixIcon: Icon(Icons.search, size: 24.w, color: const Color(0xFF075E54)),
                 filled: true,
-                fillColor: Colors.grey[100],
+                fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[700] : Colors.grey[100],
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12.r),
                   borderSide: BorderSide.none,
@@ -92,7 +93,7 @@ class UsersListScreen extends StatelessWidget {
                       )
                     : null,
               ),
-              style: GoogleFonts.poppins(fontSize: 16.sp),
+              style: GoogleFonts.poppins(fontSize: 16.sp, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black),
               onChanged: (value) => controller.filterUsers(value),
             ),
           )
@@ -101,45 +102,31 @@ class UsersListScreen extends StatelessWidget {
 
   Widget _buildUsersList(UsersListController controller) {
     return ListView.builder(
-      padding: EdgeInsets.symmetric(vertical: 8.h, horizontal: 16.w),
+      padding: EdgeInsets.zero,
       itemCount: controller.filteredUsers.length,
       itemBuilder: (context, index) {
         final user = controller.filteredUsers[index];
-        return Container(
-          margin: EdgeInsets.only(bottom: 8.h),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12.r),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 4.r,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: UserChatCard(
-            user: user,
-            onTap: () => controller.startChatWithUser(user),
-            loggedInUserName: controller.loggedInUserName.value,
-            currentUserId: controller.currentUserId,
-            senderId: '',
-            senderName: '',
-            message: '',
-            time: null,
-            seen: null,
-            showSeen: null,
-            maxWidth: null,
-          ),
+        return UserChatCard(
+          user: user,
+          onTap: () => controller.startChatWithUser(user),
+          loggedInUserName: controller.loggedInUserName.value,
+          currentUserId: controller.currentUserId,
+          senderId: '',
+          senderName: '',
+          message: '',
+          time: null,
+          seen: null,
+          showSeen: null,
+          maxWidth: null,
         );
       },
     );
   }
 
-  Widget _buildLoadingState() {
+  Widget _buildLoadingState(BuildContext context) {
     return Shimmer.fromColors(
-      baseColor: Colors.grey[200]!,
-      highlightColor: Colors.grey[100]!,
+      baseColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[700]! : Colors.grey[200]!,
+      highlightColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[600]! : Colors.grey[100]!,
       child: ListView.builder(
         padding: EdgeInsets.symmetric(vertical: 12.h, horizontal: 16.w),
         itemCount: 8,
@@ -148,7 +135,7 @@ class UsersListScreen extends StatelessWidget {
             margin: EdgeInsets.only(bottom: 8.h),
             height: 70.h,
             decoration: BoxDecoration(
-              color: const Color(0xFFECE5DD),
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : const Color(0xFFECE5DD),
               borderRadius: BorderRadius.circular(12.r),
               boxShadow: [
                 BoxShadow(
@@ -196,7 +183,7 @@ class UsersListScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState(UsersListController controller) {
+  Widget _buildEmptyState(UsersListController controller, BuildContext context) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,

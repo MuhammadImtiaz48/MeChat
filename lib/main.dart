@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -14,13 +13,15 @@ import 'package:imtiaz/firebase_Services/notification_services.dart';
 import 'package:imtiaz/models/userchat.dart';
 import 'package:imtiaz/views/auth/Signup.dart';
 import 'package:imtiaz/views/auth/login.dart';
-import 'package:imtiaz/views/auth/loginPhone.dart';
+import 'package:imtiaz/views/auth/login_phone.dart';
 import 'package:imtiaz/views/ui_screens/chat_screen.dart';
-import 'package:imtiaz/views/ui_screens/chat_screenAi.dart';
+import 'package:imtiaz/views/ui_screens/chat_screen_ai.dart';
 import 'package:imtiaz/views/ui_screens/home.dart';
 import 'package:imtiaz/views/ui_screens/splash.dart';
 import 'package:imtiaz/views/ui_screens/user_profile.dart';
 import 'package:imtiaz/views/ui_screens/users_list_screen.dart';
+import 'package:imtiaz/payment/screens/wallet_screen.dart';
+import 'package:imtiaz/payment/screens/payment_register_screen.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
 
@@ -180,7 +181,7 @@ class MyApp extends StatelessWidget {
             brightness: Brightness.dark,
             secondary: const Color(0xFF25D366),
           ),
-          scaffoldBackgroundColor: const Color(0xFF121212),
+          scaffoldBackgroundColor: const Color(0xFF0B141A),
           elevatedButtonTheme: ElevatedButtonThemeData(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF075E54),
@@ -195,7 +196,7 @@ class MyApp extends StatelessWidget {
             bodySmall: GoogleFonts.poppins(fontSize: 14.sp, color: Colors.grey[400]),
           ),
         ),
-        themeMode: ThemeMode.system,
+        themeMode: ThemeMode.dark,
         initialRoute: '/splash',
         getPages: [
           GetPage(name: '/splash', page: () => const SplashScreen()),
@@ -256,6 +257,8 @@ class MyApp extends StatelessWidget {
               );
             },
           ),
+          GetPage(name: '/wallet', page: () => const WalletScreen()),
+          GetPage(name: '/payment_register', page: () => const PaymentRegisterScreen()),
         ],
       ),
     );
@@ -294,7 +297,13 @@ class Dashboard extends StatelessWidget {
                   child: Text(
                     'Connect with friends easily & quickly',
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(fontSize: 20.sp, fontWeight: FontWeight.w400),
+                    style: GoogleFonts.poppins(
+                      fontSize: 20.sp,
+                      fontWeight: FontWeight.w400,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white70
+                          : Colors.black87,
+                    ),
                   ),
                 ),
                 SizedBox(height: 16.h),
@@ -306,7 +315,9 @@ class Dashboard extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: GoogleFonts.poppins(
                       fontSize: 16.sp,
-                      color: Colors.grey[600],
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey[400]
+                          : Colors.grey[600],
                       fontStyle: FontStyle.italic,
                     ),
                   ),
@@ -336,31 +347,15 @@ class _SocialLoginButtons extends StatelessWidget {
     final controller = Get.find<AppController>();
     return Obx(() => Stack(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _SocialButton(
-                  icon: Image.asset('assets/images/facebook.png', width: 24.w),
-                  onPressed: () {
-                    controller.errorMessage.value = 'Facebook login not implemented';
-                    controller.showSnackBar('Error', controller.errorMessage.value, Colors.red.shade600);
-                  },
-                ),
-                SizedBox(width: 16.w),
-                _SocialButton(
-                  icon: Image.asset('assets/images/google.png', width: 24.w),
-                  onPressed: controller.isLoading.value ? null : controller.loginWithGoogle,
-                ),
-                SizedBox(width: 16.w),
-                _SocialButton(
-                  icon: Icon(Icons.phone, color: const Color(0xFF075E54), size: 24.sp),
-                  onPressed: () => Get.toNamed('/phone_login'),
-                ),
-              ],
+            Center(
+              child: _SocialButton(
+                icon: Image.asset('assets/images/google.png', width: 24.w),
+                onPressed: controller.isLoading.value ? null : controller.loginWithGoogle,
+              ),
             ),
             if (controller.isLoading.value)
               Container(
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withAlpha(128),
                 child: Center(
                   child: CircularProgressIndicator(
                     color: const Color(0xFF075E54),
@@ -385,9 +380,16 @@ class _SocialButton extends StatelessWidget {
       width: 56.w,
       height: 56.h,
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey[800]
+            : Colors.grey[100],
         shape: BoxShape.circle,
-        border: Border.all(color: Colors.grey[300]!, width: 1.w),
+        border: Border.all(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? Colors.grey[600]!
+              : Colors.grey[300]!,
+          width: 1.w,
+        ),
       ),
       child: IconButton(
         icon: icon,
@@ -414,7 +416,9 @@ class _OrDivider extends StatelessWidget {
           child: Text(
             'OR',
             style: GoogleFonts.poppins(
-              color: Colors.grey[600],
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.grey[400]
+                  : Colors.grey[600],
               fontSize: 14.sp,
               fontWeight: FontWeight.w500,
             ),
@@ -453,7 +457,12 @@ class _LoginLink extends StatelessWidget {
       children: [
         Text(
           'Existing account?',
-          style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 14.sp),
+          style: GoogleFonts.poppins(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.grey[400]
+                : Colors.grey[600],
+            fontSize: 14.sp,
+          ),
         ),
         SizedBox(width: 8.w),
         GestureDetector(

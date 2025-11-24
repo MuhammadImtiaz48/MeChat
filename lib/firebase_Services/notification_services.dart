@@ -11,6 +11,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'ringtone_service.dart';
+import 'call_services.dart';
 
 class NotificationService {
   static const _scopes = ['https://www.googleapis.com/auth/firebase.messaging'];
@@ -97,17 +98,27 @@ AndroidInitializationSettings('@mipmap/launcher_icon');
         }
         try {
           final data = message.data;
-          if (data['chatId'] != _currentChatId &&
-              data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
-            showLocalNotification(
-              id: message.messageId?.hashCode ??
-                  DateTime.now().millisecondsSinceEpoch,
-              title: message.notification?.title ?? 'New Message',
-              body: message.notification?.body ?? 'You have a new message!',
-              payload: jsonEncode(data),
-              type: data['type'],
-              chatId: data['chatId'],
-            );
+          final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+          if (data['senderId'] != currentUserId && data['receiverId'] == currentUserId) {
+            final type = data['type'] ?? 'message';
+            if (type == 'call') {
+              // Handle incoming call directly
+              CallService.handleIncomingCall(data);
+            } else {
+              // Show notification for messages and payments not in current chat
+              final shouldShowNotification = type == 'payment' || data['chatId'] != _currentChatId;
+              if (shouldShowNotification) {
+                showLocalNotification(
+                  id: message.messageId?.hashCode ??
+                      DateTime.now().millisecondsSinceEpoch,
+                  title: message.notification?.title ?? (type == 'payment' ? 'Payment Received' : 'New Message'),
+                  body: message.notification?.body ?? (type == 'payment' ? 'You received a payment' : 'You have a new message!'),
+                  payload: jsonEncode(data),
+                  type: type,
+                  chatId: data['chatId'],
+                );
+              }
+            }
           }
         } catch (e) {
           debugPrint('⚠️ NotificationService: Error handling onMessage: $e');
@@ -121,7 +132,8 @@ AndroidInitializationSettings('@mipmap/launcher_icon');
         }
         try {
           final data = message.data;
-          if (data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
+          final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+          if (data['senderId'] != currentUserId && data['receiverId'] == currentUserId) {
             onNotificationTap(data.map((k, v) => MapEntry(k.toString(), v.toString())));
             if (data['type'] == 'call') {
               RingtoneService.stopRingtone();
@@ -134,18 +146,21 @@ AndroidInitializationSettings('@mipmap/launcher_icon');
 
       // When app opened from terminated state via notification
       final initialMessage = await messaging.getInitialMessage();
-      if (initialMessage != null &&
-          initialMessage.data['senderId'] != FirebaseAuth.instance.currentUser?.uid) {
-        if (kDebugMode) {
-          debugPrint('🔔 NotificationService: Opened from terminated message: ${initialMessage.notification?.title}');
-        }
-        try {
-          onNotificationTap(initialMessage.data.map((k, v) => MapEntry(k.toString(), v.toString())));
-          if (initialMessage.data['type'] == 'call') {
-            RingtoneService.stopRingtone();
+      if (initialMessage != null) {
+        final data = initialMessage.data;
+        final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+        if (data['senderId'] != currentUserId && data['receiverId'] == currentUserId) {
+          if (kDebugMode) {
+            debugPrint('🔔 NotificationService: Opened from terminated message: ${initialMessage.notification?.title}');
           }
-        } catch (e) {
-          debugPrint('⚠️ NotificationService: Error handling initialMessage: $e');
+          try {
+            onNotificationTap(data.map((k, v) => MapEntry(k.toString(), v.toString())));
+            if (data['type'] == 'call') {
+              RingtoneService.stopRingtone();
+            }
+          } catch (e) {
+            debugPrint('⚠️ NotificationService: Error handling initialMessage: $e');
+          }
         }
       }
 
@@ -215,10 +230,37 @@ AndroidInitializationSettings('@mipmap/launcher_icon');
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
-        sound: type == 'call' ? null : const RawResourceAndroidNotificationSound('default'),
+        sound: type == 'call'
+            ? const RawResourceAndroidNotificationSound('ringtone')
+            : type == 'payment'
+                ? const RawResourceAndroidNotificationSound('default')
+                : const RawResourceAndroidNotificationSound('default'),
         groupKey: id.toString(),
         fullScreenIntent: type == 'call',
         enableVibration: true,
+        category: type == 'call'
+            ? AndroidNotificationCategory.call
+            : type == 'payment'
+                ? AndroidNotificationCategory.message
+                : AndroidNotificationCategory.message,
+        color: type == 'payment' ? const Color(0xFF4CAF50) : const Color(0xFF25D366), // Green for payments
+        ledColor: type == 'payment' ? const Color(0xFF4CAF50) : const Color(0xFF25D366),
+        ledOnMs: 1000,
+        ledOffMs: 500,
+        styleInformation: BigTextStyleInformation(
+          body ?? '',
+          summaryText: title,
+          htmlFormatSummaryText: true,
+        ),
+        largeIcon: const DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
+        icon: '@mipmap/launcher_icon',
+        ticker: title,
+        when: DateTime.now().millisecondsSinceEpoch,
+        showWhen: true,
+        autoCancel: true,
+        ongoing: type == 'call',
+        onlyAlertOnce: false,
+        timeoutAfter: type == 'call' ? 30000 : null, // 30 seconds for calls
       );
 
       final NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
@@ -298,8 +340,11 @@ AndroidInitializationSettings('@mipmap/launcher_icon');
             'body': body,
             'channel_id': _channelId,
             'sound': payload['type'] == 'call' ? 'ringtone' : 'default',
+            'color': type == 'payment' ? '#FF4CAF50' : '#FF25D366', // Green for payments
+            'icon': '@mipmap/launcher_icon',
+            'tag': type == 'payment' ? 'payment_${payload['transactionId']}' : null,
           },
-          'priority': type == 'call' ? 'high' : 'normal',
+          'priority': type == 'call' || type == 'payment' ? 'high' : 'normal',
         };
 
         final message = {

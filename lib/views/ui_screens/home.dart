@@ -11,6 +11,8 @@ import 'package:imtiaz/controllers/home_screen_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:imtiaz/models/userchat.dart';
 import 'package:imtiaz/views/ui_screens/user_profile.dart';
+import 'package:imtiaz/views/ui_screens/settings_screen.dart';
+import 'package:imtiaz/views/ui_screens/help_screen.dart';
 import 'package:imtiaz/widgets/user_chat_card.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -26,9 +28,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   late final HomeController controller;
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
 
@@ -36,7 +35,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _initializeController();
-    _initializeAnimations();
     _loadUserNameFromFirestore();
     _initializeConnectivity();
   }
@@ -48,22 +46,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     });
   }
 
-  void _initializeAnimations() {
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    );
-    
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
-    );
-    
-    _scaleAnimation = Tween<double>(begin: 0.9, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
-    );
-    
-    _animationController.forward();
-  }
 
   Future<void> _loadUserNameFromFirestore() async {
     final user = _auth.currentUser;
@@ -276,7 +258,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     _connectivitySubscription.cancel();
-    _animationController.dispose();
     super.dispose();
   }
 
@@ -298,12 +279,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           isTallScreen: isTallScreen,
         );
 
-        return Scaffold(
-          backgroundColor: const Color(0xFFECE5DD),
-          appBar: _buildAppBar(layoutMetrics),
-          drawer: _buildDrawer(layoutMetrics),
-          body: _buildBody(layoutMetrics),
-          floatingActionButton: _buildFloatingActionButton(layoutMetrics),
+        return Builder(
+          builder: (context) => Scaffold(
+            backgroundColor: const Color(0xFFE5DDD5),
+            appBar: _buildAppBar(layoutMetrics),
+            drawer: _buildDrawer(layoutMetrics),
+            body: _buildBody(layoutMetrics),
+            floatingActionButton: _buildFloatingActionButton(layoutMetrics),
+          ),
         );
       },
     );
@@ -372,9 +355,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ],
     ).then((value) {
       if (value == 'settings') {
-        _showSnackBar('Settings', 'Feature coming soon!', Colors.blue);
+        Get.to(() => const SettingsScreen());
       } else if (value == 'help') {
-        _showSnackBar('Help', 'Contact support for assistance', Colors.blue);
+        Get.to(() => const HelpScreen());
       }
     });
   }
@@ -461,6 +444,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Column(
       children: [
         _buildDrawerTile(
+          icon: Icons.account_balance_wallet,
+          title: 'Wallet',
+          onTap: _navigateToWallet,
+          metrics: metrics,
+        ),
+        _buildDrawerTile(
           icon: Icons.person,
           title: 'Profile',
           onTap: _navigateToProfile,
@@ -490,6 +479,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ),
       onTap: onTap,
     );
+  }
+
+  void _navigateToWallet() {
+    Get.back();
+    Get.toNamed('/wallet')?.then((_) {
+      // Force refresh when returning from wallet screen
+      controller.loadUsers();
+      controller.refreshTrigger.toggle();
+    });
   }
 
   Future<void> _navigateToProfile() async {
@@ -540,22 +538,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget _buildBody(_LayoutMetrics metrics) {
     return Container(
       color: Theme.of(context).brightness == Brightness.dark
-          ? const Color(0xFF121212)
-          : const Color(0xFFECE5DD),
+          ? const Color(0xFF0B141A)
+          : const Color(0xFFE5DDD5),
       child: Column(
         children: [
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
-              child: Column(
-                children: [
-                  _buildOfflineBanner(metrics),
-                  _buildSearchField(metrics),
-                ],
-              ),
-            ),
-          ),
+          _buildOfflineBanner(metrics),
+          _buildSearchField(metrics),
           _buildUserList(metrics),
         ],
       ),
@@ -566,6 +554,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return FloatingActionButton(
       onPressed: () => Get.toNamed('/users_list'),
       backgroundColor: const Color(0xFF25D366),
+      elevation: 8,
       tooltip: 'New Chat',
       child: Icon(
         Icons.chat,
@@ -598,8 +587,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Obx(() => controller.isSearching.value
         ? Container(
             color: Theme.of(context).brightness == Brightness.dark
-                ? const Color(0xFF121212)
-                : const Color(0xFFECE5DD),
+                ? const Color(0xFF0B141A)
+                : const Color(0xFFE5DDD5),
             padding: EdgeInsets.symmetric(
               horizontal: metrics.paddingHorizontal,
               vertical: metrics.paddingVertical,
@@ -669,7 +658,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           );
         }
 
-        return _buildUserListView(metrics);
+        return Container(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF0B141A)
+              : const Color(0xFFE5DDD5),
+          child: _buildUserListView(metrics),
+        );
       }),
     );
   }
@@ -805,46 +799,64 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           : () => _showSnackBar('Offline', 'AI chat requires internet connection', Colors.orange),
       child: Container(
         color: Theme.of(context).brightness == Brightness.dark
-            ? const Color(0xFF121212)
-            : const Color(0xFFECE5DD),
+            ? const Color(0xFF0B141A)
+            : const Color(0xFFE5DDD5),
         child: Column(
           children: [
             Container(
-              margin: EdgeInsets.symmetric(horizontal: 16.w),
+              margin: EdgeInsets.symmetric(horizontal: 0.w), // Full width
+              padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h), // Reduced padding for smaller height
               decoration: BoxDecoration(
-                color: controller.isOnline.value ? const Color(0xFF075E54) : Colors.grey[400],
-                borderRadius: BorderRadius.circular(12.r),
+                color: controller.isOnline.value
+                    ? Colors.lightGreen.withValues(alpha: 0.3) // Transparent light green
+                    : Colors.grey[400],
+                borderRadius: BorderRadius.circular(8.r), // Smaller border radius
+                border: Border.all(
+                  color: controller.isOnline.value ? Colors.lightGreen.withValues(alpha: 0.5) : Colors.grey[500]!,
+                  width: 1,
+                ),
               ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  radius: metrics.isTablet ? 24.r : 20.r,
-                  backgroundColor: Colors.white,
-                  child: Icon(
-                    Icons.smart_toy,
-                    color: const Color(0xFF075E54),
-                    size: metrics.isTablet ? 28.w : 24.w,
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: metrics.isTablet ? 20.r : 16.r, // Smaller avatar
+                    backgroundColor: Colors.white,
+                    child: Icon(
+                      Icons.smart_toy, // Changed icon to robot/AI icon
+                      color: controller.isOnline.value ? Colors.lightGreen : Colors.grey[600],
+                      size: metrics.isTablet ? 24.w : 20.w,
+                    ),
                   ),
-                ),
-                title: Text(
-                  'MeChat AI',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: metrics.isTablet ? 18.sp : 16.sp,
+                  SizedBox(width: 12.w),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min, // Minimize height
+                      children: [
+                        Text(
+                          'MeChat AI Assistant',
+                          style: GoogleFonts.poppins(
+                            color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87,
+                            fontWeight: FontWeight.w600,
+                            fontSize: metrics.isTablet ? 16.sp : 14.sp,
+                          ),
+                        ),
+                        Text(
+                          controller.isOnline.value ? 'Tap to chat with AI' : 'Offline - Connect to use AI',
+                          style: GoogleFonts.poppins(
+                            color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.grey[600],
+                            fontSize: metrics.fontSizeSubtitle - 1,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                subtitle: Text(
-                  controller.isOnline.value ? 'Chat with our AI assistant' : 'Offline - Connect to use AI',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white70,
-                    fontSize: metrics.fontSizeSubtitle,
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.grey[600],
+                    size: metrics.isTablet ? 16.w : 14.w,
                   ),
-                ),
-                trailing: Icon(
-                  Icons.arrow_forward_ios,
-                  color: Colors.white,
-                  size: metrics.isTablet ? 18.w : 16.w,
-                ),
+                ],
               ),
             ),
             Container(
@@ -852,7 +864,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               color: Theme.of(context).brightness == Brightness.dark
                   ? Colors.grey[700]
                   : Colors.grey[300],
-              margin: EdgeInsets.symmetric(horizontal: 16.w),
+              margin: EdgeInsets.symmetric(horizontal: 0.w), // Full width separator
             ),
           ],
         ),
@@ -861,34 +873,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildLoadingState(_LayoutMetrics metrics) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final shimmerColor = isDark ? const Color(0xFF1A1A1A) : const Color(0xFFE8E8E8);
+
     return Container(
-      color: Theme.of(context).brightness == Brightness.dark
-          ? const Color(0xFF121212)
-          : const Color(0xFFECE5DD),
+      color: isDark ? const Color(0xFF0B141A) : const Color(0xFFE5DDD5),
       child: Shimmer.fromColors(
-        baseColor: Theme.of(context).brightness == Brightness.dark
-            ? Colors.grey[700]!
-            : Colors.grey[200]!,
-        highlightColor: Theme.of(context).brightness == Brightness.dark
-            ? Colors.grey[600]!
-            : Colors.grey[100]!,
+        baseColor: shimmerColor,
+        highlightColor: shimmerColor,
         child: ListView.builder(
           padding: EdgeInsets.zero,
-          itemCount: 5,
+          itemCount: 3, // Reduced from 5 for faster loading
           itemBuilder: (context, index) {
             return Container(
               padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xFF1E1E1E)
-                  : Colors.white,
+              color: isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD),
               child: Row(
                 children: [
                   Container(
                     width: 50.w,
                     height: 50.h,
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.grey,
+                      color: shimmerColor,
                     ),
                   ),
                   SizedBox(width: 12.w),
@@ -899,13 +906,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         Container(
                           width: 120.w,
                           height: 16.h,
-                          color: Colors.grey,
+                          color: shimmerColor,
                         ),
                         SizedBox(height: 8.h),
                         Container(
                           width: 80.w,
                           height: 12.h,
-                          color: Colors.grey,
+                          color: shimmerColor,
                         ),
                       ],
                     ),
@@ -922,8 +929,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget _buildEmptyState(_LayoutMetrics metrics) {
     return Container(
       color: Theme.of(context).brightness == Brightness.dark
-          ? const Color(0xFF121212)
-          : const Color(0xFFECE5DD),
+          ? const Color(0xFF0B141A)
+          : const Color(0xFFE5DDD5),
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,

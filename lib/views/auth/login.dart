@@ -126,7 +126,7 @@ class LoginScreen extends StatelessWidget {
         ),
         Obx(() => controller.loading.value
             ? Container(
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withAlpha(128),
                 child: Center(
                   child: CircularProgressIndicator(
                     valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF075E54)),

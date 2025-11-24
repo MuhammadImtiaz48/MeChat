@@ -27,8 +27,8 @@ class SplashScreen extends StatelessWidget {
               end: Alignment.bottomRight,
               colors: [
                 Colors.white,
-                const Color(0xFF075E54).withOpacity(0.15),
-                const Color(0xFF25D366).withOpacity(0.05),
+                const Color(0xFF075E54).withAlpha(38),
+                const Color(0xFF25D366).withAlpha(13),
               ],
               stops: const [0.0, 0.7, 1.0],
             ),
@@ -55,7 +55,7 @@ class SplashScreen extends StatelessWidget {
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.grey.withOpacity(0.3),
+                                  color: Colors.grey.withAlpha(77),
                                   blurRadius: 10.r,
                                   spreadRadius: 3.r,
                                   offset: const Offset(0, 3),
@@ -201,7 +201,7 @@ class SplashScreen extends StatelessWidget {
                                         ),
                                         padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 12.h),
                                         elevation: 2,
-                                        shadowColor: Colors.grey.withOpacity(0.3),
+                                        shadowColor: Colors.grey.withAlpha(77),
                                       ),
                                       child: Text(
                                         'Retry',

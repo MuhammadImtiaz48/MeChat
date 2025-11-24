@@ -376,7 +376,7 @@ class ChatController extends GetxController {
           cachedMessages.insert(0, cachedMsg);
           await cacheMessages(cachedMessages.toList());
 
-          if (receiverFcmToken != null && receiverFcmToken.isNotEmpty) {
+          if (receiverFcmToken != null && receiverFcmToken.isNotEmpty && user.uid != currentUser.uid) {
             final success = await NotificationService.sendPushNotification(
               targetToken: receiverFcmToken,
               title: myName.value.isNotEmpty ? myName.value : 'User',
@@ -408,7 +408,7 @@ class ChatController extends GetxController {
             }
           } else {
             if (kDebugMode) {
-              debugPrint('⚠️ ChatController: No valid FCM token for receiver=${user.uid}, message notification skipped');
+              debugPrint('⚠️ ChatController: No valid FCM token for receiver=${user.uid} or self-message, message notification skipped');
             }
           }
 
@@ -612,7 +612,7 @@ class ChatController extends GetxController {
         if (kDebugMode) {
           debugPrint('ChatController: Starting ${isVideo ? 'video' : 'voice'} call with ${user.uid}');
         }
-        if (receiverFcmToken != null && receiverFcmToken.isNotEmpty) {
+        if (receiverFcmToken != null && receiverFcmToken.isNotEmpty && user.uid != _auth.currentUser!.uid) {
           final success = await NotificationService.sendPushNotification(
             targetToken: receiverFcmToken,
             title: isVideo ? 'Incoming Video Call' : 'Incoming Voice Call',
@@ -645,12 +645,12 @@ class ChatController extends GetxController {
           }
         } else {
           if (kDebugMode) {
-            debugPrint('⚠️ ChatController: No valid FCM token for receiver=${user.uid}, call notification skipped');
+            debugPrint('⚠️ ChatController: No valid FCM token for receiver=${user.uid} or self-call, call notification skipped');
           }
         }
 
         Get.to(() => ZegoUIKitPrebuiltCall(
-              appID: 116174848,
+              appID: zegoAppID,
               appSign: '07f8d98822d54bc39ffc058f2c0a2b638930ba0c37156225bac798ae0f90f679',
               userID: _auth.currentUser!.uid,
               userName: myName.value.isNotEmpty ? myName.value : 'User',

@@ -17,7 +17,7 @@ import 'package:imtiaz/firebase_Services/notification_services.dart';
 import 'package:imtiaz/models/massagesmodel.dart';
 import 'package:imtiaz/models/userchat.dart';
 import 'package:imtiaz/views/ui_screens/user_profile.dart';
-import 'package:imtiaz/widgets/chatmaasgeCard.dart';
+import 'package:imtiaz/widgets/chat_message_card.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -43,7 +43,8 @@ class _ChatScreenState extends State<ChatScreen> {
   late final AppController appController;
   late final CloudinaryService cloudinaryService;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
-  bool _isCalling = false;
+  bool _isVideoCalling = false;
+  bool _isVoiceCalling = false;
   bool _isUploading = false;
 
   @override
@@ -63,7 +64,7 @@ class _ChatScreenState extends State<ChatScreen> {
           debugPrint('ChatScreen: Handling call notification tap: $payload');
         }
         Get.to(() => ZegoUIKitPrebuiltCall(
-              appID: 116174848,
+              appID: zegoAppID,
               appSign: '07f8d98822d54bc39ffc058f2c0a2b638930ba0c37156225bac798ae0f90f679',
               userID: FirebaseAuth.instance.currentUser!.uid,
               userName: widget.loggedInUserName.isNotEmpty ? widget.loggedInUserName : 'User',
@@ -136,7 +137,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _scrollToBottom() {
     if (scrollController.hasClients) {
       scrollController.animateTo(
-        scrollController.position.maxScrollExtent,
+        scrollController.position.minScrollExtent,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
@@ -268,26 +269,30 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _pickImage(ImageSource source) async {
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: source, imageQuality: 80);
+      final pickedFile = await picker.pickImage(source: source, imageQuality: 80).timeout(const Duration(seconds: 30));
 
       if (pickedFile != null) {
         await _uploadAndSendMedia(File(pickedFile.path), MessageType.image);
       }
+    } on TimeoutException {
+      _showSnackBar('Error', 'Image picker timed out. Please try again.', Colors.red);
     } catch (e) {
-      _showSnackBar('Error', 'Failed to pick image: $e', Colors.red);
+      _showSnackBar('Error', 'Failed to pick image: ${e.toString()}', Colors.red);
     }
   }
 
   Future<void> _pickVideo() async {
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickVideo(source: ImageSource.gallery);
+      final pickedFile = await picker.pickVideo(source: ImageSource.gallery).timeout(const Duration(seconds: 30));
 
       if (pickedFile != null) {
         await _uploadAndSendMedia(File(pickedFile.path), MessageType.video);
       }
+    } on TimeoutException {
+      _showSnackBar('Error', 'Video picker timed out. Please try again.', Colors.red);
     } catch (e) {
-      _showSnackBar('Error', 'Failed to pick video: $e', Colors.red);
+      _showSnackBar('Error', 'Failed to pick video: ${e.toString()}', Colors.red);
     }
   }
 
@@ -296,14 +301,16 @@ class _ChatScreenState extends State<ChatScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.any,
         allowMultiple: false,
-      );
+      ).timeout(const Duration(seconds: 30));
 
       if (result != null && result.files.single.path != null) {
         final file = File(result.files.single.path!);
         await _uploadAndSendMedia(file, MessageType.file, fileName: result.files.single.name, message: msgController.text.trim());
       }
+    } on TimeoutException {
+      _showSnackBar('Error', 'File picker timed out. Please try again.', Colors.red);
     } catch (e) {
-      _showSnackBar('Error', 'Failed to pick document: $e', Colors.red);
+      _showSnackBar('Error', 'Failed to pick document: ${e.toString()}', Colors.red);
     }
   }
 
@@ -319,19 +326,25 @@ class _ChatScreenState extends State<ChatScreen> {
       String? mediaUrl;
       String? finalFileName = fileName;
 
-      switch (type) {
-        case MessageType.image:
-          mediaUrl = await cloudinaryService.uploadImageToCloudinary(file);
-          break;
-        case MessageType.video:
-          mediaUrl = await cloudinaryService.uploadVideoToCloudinary(file);
-          break;
-        case MessageType.file:
-          mediaUrl = await cloudinaryService.uploadFileToCloudinary(file);
-          break;
-        default:
-          break;
-      }
+      // Add timeout to prevent indefinite hanging
+      await Future.any([
+        () async {
+          switch (type) {
+            case MessageType.image:
+              mediaUrl = await cloudinaryService.uploadImageToCloudinary(file);
+              break;
+            case MessageType.video:
+              mediaUrl = await cloudinaryService.uploadVideoToCloudinary(file);
+              break;
+            case MessageType.file:
+              mediaUrl = await cloudinaryService.uploadFileToCloudinary(file);
+              break;
+            default:
+              break;
+          }
+        }(),
+        Future.delayed(const Duration(seconds: 30), () => throw TimeoutException('Upload timeout')),
+      ]);
 
       if (mediaUrl != null) {
         final messageText = message ?? msgController.text.trim();
@@ -349,7 +362,8 @@ class _ChatScreenState extends State<ChatScreen> {
             .collection('chats')
             .doc(controller.chatRoomId)
             .collection('messages')
-            .add(messageModel.toMap());
+            .add(messageModel.toMap())
+            .timeout(const Duration(seconds: 10));
 
         msgController.clear();
         _scrollToBottom();
@@ -357,10 +371,14 @@ class _ChatScreenState extends State<ChatScreen> {
       } else {
         _showSnackBar('Error', 'Failed to upload ${type.toString().split('.').last}', Colors.red);
       }
+    } on TimeoutException {
+      _showSnackBar('Error', 'Upload timed out. Please try again.', Colors.red);
     } catch (e) {
-      _showSnackBar('Error', 'Failed to send media: $e', Colors.red);
+      _showSnackBar('Error', 'Failed to send media: ${e.toString()}', Colors.red);
     } finally {
-      setState(() => _isUploading = false);
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
     }
   }
   @override
@@ -386,7 +404,9 @@ class _ChatScreenState extends State<ChatScreen> {
         final paddingVertical = isTallScreen ? 8.h : 6.h;
 
         return Scaffold(
-          backgroundColor: const Color(0xFFECE5DD),
+          backgroundColor: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF0B141A)
+              : const Color(0xFFE5DDD5),
           appBar: PreferredSize(
             preferredSize: Size.fromHeight(appBarHeight),
             child: AppBar(
@@ -502,7 +522,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Obx(() => IconButton(
                       padding: EdgeInsets.symmetric(horizontal: paddingHorizontal * 0.5),
                       constraints: BoxConstraints(maxWidth: isSmallScreen ? 30.w : isTablet ? 40.w : 36.w),
-                      icon: _isCalling
+                      icon: _isVideoCalling
                           ? SizedBox(
                               width: iconSize * 0.6,
                               height: iconSize * 0.6,
@@ -512,10 +532,10 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                             )
                           : Icon(Icons.videocam, color: Colors.white, size: iconSize),
-                      onPressed: controller.isOnline.value && appController.isZegoInitialized.value && !_isCalling
+                      onPressed: controller.isOnline.value && appController.isZegoInitialized.value && !_isVideoCalling && !_isVoiceCalling
                           ? () async {
                               setState(() {
-                                _isCalling = true;
+                                _isVideoCalling = true;
                               });
                               try {
                                 await controller.startCall(isVideo: true);
@@ -524,7 +544,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 _showSnackBar('Error', 'Video call failed: Network issue', Colors.red);
                               } finally {
                                 setState(() {
-                                  _isCalling = false;
+                                  _isVideoCalling = false;
                                 });
                               }
                             }
@@ -538,7 +558,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Obx(() => IconButton(
                       padding: EdgeInsets.symmetric(horizontal: paddingHorizontal * 0.5),
                       constraints: BoxConstraints(maxWidth: isSmallScreen ? 30.w : isTablet ? 40.w : 36.w),
-                      icon: _isCalling
+                      icon: _isVoiceCalling
                           ? SizedBox(
                               width: iconSize * 0.6,
                               height: iconSize * 0.6,
@@ -548,10 +568,10 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                             )
                           : Icon(Icons.call, color: Colors.white, size: iconSize),
-                      onPressed: controller.isOnline.value && appController.isZegoInitialized.value && !_isCalling
+                      onPressed: controller.isOnline.value && appController.isZegoInitialized.value && !_isVideoCalling && !_isVoiceCalling
                           ? () async {
                               setState(() {
-                                _isCalling = true;
+                                _isVoiceCalling = true;
                               });
                               try {
                                 await controller.startCall(isVideo: false);
@@ -560,7 +580,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 _showSnackBar('Error', 'Voice call failed: Network issue', Colors.red);
                               } finally {
                                 setState(() {
-                                  _isCalling = false;
+                                  _isVoiceCalling = false;
                                 });
                               }
                             }
@@ -679,8 +699,10 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           body: Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFFECE5DD),
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF0B141A)
+                  : const Color(0xFFE5DDD5),
             ),
             child: Column(
               children: [
@@ -838,7 +860,9 @@ class _ChatScreenState extends State<ChatScreen> {
                           if (isTyping) {
                             return Container(
                               padding: EdgeInsets.symmetric(horizontal: paddingHorizontal + 6.w, vertical: paddingVertical),
-                              color: const Color(0xFFECE5DD),
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? const Color(0xFF0B141A)
+                                  : const Color(0xFFE5DDD5),
                               child: Row(
                                 children: [
                                   SizedBox(
@@ -868,7 +892,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     )),
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: paddingHorizontal, vertical: paddingVertical),
-                  color: const Color(0xFFECE5DD),
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF0B141A)
+                      : const Color(0xFFE5DDD5),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [

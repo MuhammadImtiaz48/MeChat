@@ -6,15 +6,14 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:imtiaz/views/ui_screens/chat_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
 import 'package:imtiaz/models/userchat.dart';
 
-const int zegoAppID = 770043653;
-const String zegoAppSign = 'eabc2c5b2c7d227ffc3dfa351eb275c9968b66ccc0d0532bde92b29f911cdeea';
+const int zegoAppID = 1594596596;
+const String zegoAppSign = '305434fc77fd131fb25e505218b60d4caa5e46cea28f1533363190df19e39dd4';
 
 class AppController extends GetxController {
   final RxBool isOnline = true.obs;
@@ -79,8 +78,16 @@ class AppController extends GetxController {
         return;
       }
 
+      // Google Sign-In is disabled for now due to API changes
+      errorMessage.value = 'Google Sign-In is temporarily unavailable';
+      showSnackBar('Error', errorMessage.value, Colors.red.shade600);
+      return;
+
+      // Commented out the problematic code
+      /*
       final googleSignIn = GoogleSignIn();
-      final googleUser = await googleSignIn.signIn().timeout(const Duration(seconds: 10));
+      final googleUser = await googleSignIn.signIn();
+
       if (googleUser == null) {
         debugPrint('⚠️ Google Sign-In cancelled by user');
         return;
@@ -107,45 +114,13 @@ class AppController extends GetxController {
           arguments: {'userName': cachedUserData['name'] ?? userCredential.user!.email!.split('@')[0]},
         );
       }
+      */
     } catch (e) {
       debugPrint('❌ Google Sign-In error: $e');
       errorMessage.value = 'Google Sign-In failed: ${e.toString().split('.').first}';
       showSnackBar('Error', errorMessage.value, Colors.red.shade600);
     } finally {
       isLoading.value = false;
-    }
-  }
-
-  Future<void> _cacheUserData(User user) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final name = user.displayName?.trim() ??
-          user.email?.split('@')[0] ??
-          'User-${user.uid.substring(0, 6)}';
-      final fcmToken = await FirebaseMessaging.instance.getToken() ?? '';
-      await prefs.setString('user_uid', user.uid);
-      await prefs.setString('user_name', name);
-      await prefs.setString('user_email', user.email ?? '');
-      await prefs.setString('user_profilePic', user.photoURL ?? '');
-      await prefs.setString('user_fcmToken', fcmToken);
-      cachedUserData.assignAll({
-        'uid': user.uid,
-        'name': name,
-        'email': user.email ?? '',
-        'profilePic': user.photoURL ?? '',
-        'fcmToken': fcmToken,
-      });
-      currentUserModel.value = UserchatModel(
-        uid: user.uid,
-        name: name,
-        email: user.email ?? '',
-        image: user.photoURL ?? '',
-        fcmToken: fcmToken,
-        profilePic: '',
-      );
-      debugPrint('✅ AppController: User data cached: uid=${user.uid}, name=$name');
-    } catch (e) {
-      debugPrint('❌ AppController: Cache user data error: $e');
     }
   }
 
@@ -279,10 +254,15 @@ class AppController extends GetxController {
       final senderId = data['senderId'];
       final chatId = data['chatId'] ?? '';
       final callId = data['callId'] ?? '';
-      final callType = data['callType'] ?? 'video';
 
-      if (senderId == null || chatId.isEmpty || currentUser.value == null) {
-        debugPrint('⚠️ AppController: Invalid notification data: senderId=$senderId, chatId=$chatId');
+      if (senderId == null || currentUser.value == null) {
+        debugPrint('⚠️ AppController: Invalid notification data: senderId=$senderId, type=$type');
+        return;
+      }
+
+      // For payments, chatId can be empty
+      if (type != 'payment' && chatId.isEmpty) {
+        debugPrint('⚠️ AppController: Invalid notification data: chatId is empty for non-payment type');
         return;
       }
 
@@ -348,21 +328,34 @@ class AppController extends GetxController {
             'loggedInUserName': loggedInUserName,
           },
         );
-      } else if (type == 'call' && isOnline.value) {
-        debugPrint('🚀 AppController: Navigating to Call Screen: callId=$callId');
-        Get.to(() => ZegoUIKitPrebuiltCall(
-              appID: zegoAppID,
-              appSign: zegoAppSign,
-              userID: currentUser.value!.uid,
-              userName: loggedInUserName,
-              callID: callId,
-              config: callType == 'video'
-                  ? ZegoUIKitPrebuiltCallConfig.oneOnOneVideoCall()
-                  : ZegoUIKitPrebuiltCallConfig.oneOnOneVoiceCall(),
-            ));
-      } else if (type == 'call' && !isOnline.value) {
-        errorMessage.value = 'Cannot initiate calls while offline';
-        showSnackBar('Offline', errorMessage.value, Colors.red.shade600);
+      } else if (type == 'call') {
+        if (isOnline.value) {
+          debugPrint('🚀 AppController: Call notification tapped: callId=$callId');
+          // For call notifications from terminated/background state,
+          // since the call might not be active anymore, navigate to chat
+          // In a production app, you'd check if the call is still active
+          Get.toNamed(
+            '/chat',
+            arguments: {
+              'user': UserchatModel(
+                uid: senderId,
+                name: 'Unknown', // Would need to fetch from Firestore
+                email: '',
+                image: '',
+                fcmToken: '',
+                profilePic: '',
+              ),
+              'loggedInUserName': loggedInUserName,
+            },
+          );
+        } else {
+          errorMessage.value = 'Cannot initiate calls while offline';
+          showSnackBar('Offline', errorMessage.value, Colors.red.shade600);
+        }
+      } else if (type == 'payment') {
+        debugPrint('🚀 AppController: Payment notification tapped');
+        // Navigate to wallet screen to show payment details
+        Get.toNamed('/wallet');
       }
     } catch (e) {
       debugPrint('❌ AppController: Notification tap error: $e');

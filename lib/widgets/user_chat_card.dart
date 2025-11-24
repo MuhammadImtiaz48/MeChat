@@ -61,10 +61,20 @@ class UserChatCard extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? const Color(0xFF1E1E1E)
-            : const Color(0xFFECE5DD),
         padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF121212)
+              : const Color(0xFFECE5DD),
+          border: Border(
+            bottom: BorderSide(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.grey[700]!
+                  : Colors.grey[300]!,
+              width: 0.5,
+            ),
+          ),
+        ),
         child: Row(
           children: [
             GestureDetector(

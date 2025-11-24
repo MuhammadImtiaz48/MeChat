@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +8,6 @@ import 'package:imtiaz/firebase_Services/cloudinary_service.dart';
 import 'package:imtiaz/controllers/app_controller.dart';
 import 'package:imtiaz/models/userchat.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:path/path.dart';
 
 class UserProfileScreen extends StatefulWidget {
   final String userId;
@@ -103,7 +101,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         leading: Container(
           margin: EdgeInsets.only(left: 8.w, top: 4.h),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.8),
+            color: Colors.white.withAlpha(204),
             shape: BoxShape.circle,
           ),
           child: IconButton(
@@ -118,7 +116,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFF075E54).withOpacity(0.2),
+              const Color(0xFF075E54).withAlpha(51),
               Colors.white,
             ],
             begin: Alignment.topCenter,

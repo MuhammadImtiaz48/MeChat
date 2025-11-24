@@ -39,11 +39,15 @@ class _OtpScreenState extends State<OtpScreen> {
       await _auth.signInWithCredential(credential);
 
       // Navigate to home screen or dashboard
-      Navigator.pushReplacementNamed(context, '/home');
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/home');
+      }
     } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Invalid OTP: ${e.message}")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Invalid OTP: ${e.message}")),
+        );
+      }
     } finally {
       setState(() {
         isLoading = false;

@@ -1,0 +1,6 @@
+Running Gradle task 'assembleDebug'...                          
+[ZEGO][PLUGIN] Download native dependency
+[ZEGO][PLUGIN] Native version: 3.22.0.46141
+[ZEGO][PLUGIN] The specified version SDK already exists!
+Running Gradle task 'assembleDebug'...                            104.3s
+Gradle build failed to produce an .apk file. It's likely that this file was generated under f:\project111\MeChat\build, but the tool couldn't find it.

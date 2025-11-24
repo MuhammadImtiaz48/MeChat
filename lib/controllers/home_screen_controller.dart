@@ -20,6 +20,7 @@ class HomeController extends GetxController {
   final RxBool isSearching = false.obs;
   final RxString loggedInUserName = ''.obs;
   final RxBool isOnline = true.obs;
+  final RxBool refreshTrigger = false.obs;
   final TextEditingController searchController = TextEditingController();
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   StreamSubscription<RemoteMessage>? _fcmForegroundSubscription;

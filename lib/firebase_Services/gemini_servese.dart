@@ -56,8 +56,6 @@ class GeminiService {
       body: body,
     );
 
-    print("Raw Gemini Response: ${response.body}");
-
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
 

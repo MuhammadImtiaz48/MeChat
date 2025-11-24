@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:imtiaz/views/auth/otp_Screen.dart';
+import 'package:imtiaz/views/auth/otp_screen.dart';
 import 'package:imtiaz/utils/lnvlidemail.dart'; // Make sure Utils is correctly defined
 import 'package:imtiaz/widgets/buttens.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';

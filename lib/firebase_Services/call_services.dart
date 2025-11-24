@@ -1,8 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:imtiaz/firebase_Services/notification_services.dart';
 import 'package:imtiaz/firebase_Services/ringtone_service.dart';
 import 'package:imtiaz/views/ui_screens/vediocall.dart';
+import 'package:imtiaz/views/ui_screens/vediocalling_screen.dart';
 import 'package:imtiaz/views/ui_screens/vediocalling_screen.dart';
 
 
@@ -18,18 +20,25 @@ class CallService {
     final callId = data['callId'] ?? "";
     final callType = data['callType'] ?? "video";
 
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final userId = currentUser?.uid ?? '';
+    final userName = currentUser?.displayName ?? currentUser?.email?.split('@')[0] ?? 'User';
+
     _isCallScreenOpen = true;
     RingtoneService.playRingtone();
 
     if (Get.context != null) {
-      Get.to(() => IncomingCallScreen(
-            callerName: callerName,
-            callerId: callerId,
-            callId: callId,
-            callType: callType,
-            userId: '',
-            userName: '',
-          ))?.then((_) {
+      Get.dialog(
+        IncomingCallScreen(
+          callerName: callerName,
+          callerId: callerId,
+          callId: callId,
+          callType: callType,
+          userId: userId,
+          userName: userName,
+        ),
+        barrierDismissible: false,
+      ).then((_) {
         _isCallScreenOpen = false;
         RingtoneService.stopRingtone();
       });

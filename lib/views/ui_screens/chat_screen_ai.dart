@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:http/http.dart' as http;
 import 'package:google_fonts/google_fonts.dart';
+import '../../firebase_Services/gemini_servese.dart';
 
 class GeminiChatScreen extends StatefulWidget {
   const GeminiChatScreen({super.key});
@@ -17,8 +16,15 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
   final List<Map<String, dynamic>> _messages = [];
   File? _selectedImage;
   bool _isLoading = false;
+  late final GeminiService _geminiService;
 
-  final String apiKey = "AIzaSyB5uivgZW0VOZpCNIEnrFUI_oQjz_44X8w"; // Replace with your API key
+  final String apiKey = "AIzaSyAgt_PyIoeKrOIiWXcMKme-hk_jhxOTOP0"; // Gemini API key
+
+  @override
+  void initState() {
+    super.initState();
+    _geminiService = GeminiService(apiKey: apiKey);
+  }
 
   // Pick image from gallery/camera
   Future<void> _pickImage(ImageSource source) async {
@@ -44,55 +50,22 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
       _isLoading = true;
     });
 
-    final url = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent', // Updated to a supported model as of September 2025
-    );
-
-    // Build request body
-    final contents = [
-      {
-        "parts": [
-          if (_controller.text.isNotEmpty) {"text": _controller.text},
-          if (_selectedImage != null)
-            {
-              "inline_data": {
-                "mime_type": "image/jpeg",
-                "data": base64Encode(await _selectedImage!.readAsBytes()),
-              }
-            }
-        ]
-      }
-    ];
-
-    final response = await http.post(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-goog-api-key': apiKey,
-      },
-      body: jsonEncode({"contents": contents}),
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-
-      String reply = "No response";
-      if (data['candidates'] != null &&
-          data['candidates'].isNotEmpty &&
-          data['candidates'][0]['content'] != null &&
-          data['candidates'][0]['content']['parts'] != null) {
-        final parts = data['candidates'][0]['content']['parts'];
-        reply = parts.map((p) => p['text'] ?? "").join("\n");
+    try {
+      String reply;
+      if (_selectedImage != null) {
+        reply = await _geminiService.sendTextWithImage(_controller.text, _selectedImage!);
+      } else {
+        reply = await _geminiService.sendTextMessage(_controller.text);
       }
 
       setState(() {
         _messages.add({"sender": "ai", "text": reply});
       });
-    } else {
+    } catch (e) {
       setState(() {
         _messages.add({
           "sender": "ai",
-          "text": "Error: ${response.body.contains('NOT_FOUND') ? 'Model not supported or unavailable. Try a different model.' : response.body}"
+          "text": "Error: $e"
         });
       });
     }
@@ -116,15 +89,7 @@ class _GeminiChatScreenState extends State<GeminiChatScreen> {
             fontSize: 22,
           ),
         ),
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF075E54), Color(0xFF25D366)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
+        backgroundColor: const Color(0xFF075E54),
         elevation: 0,
       ),
       body: Container(

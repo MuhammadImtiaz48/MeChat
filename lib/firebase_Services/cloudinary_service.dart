@@ -42,14 +42,13 @@ class CloudinaryService {
       if (streamed.statusCode == 200) {
         final data = json.decode(response.body) as Map<String, dynamic>;
         final String fileUrl = data['secure_url'] as String;
-        print("✅ Uploaded to Cloudinary: $fileUrl");
         return fileUrl;
       } else {
-        print("❌ Cloudinary upload failed: ${response.body}");
+        // Upload failed
         return null;
       }
     } catch (e) {
-      print("⚠️ Cloudinary Upload Error: $e");
+      // Cloudinary upload error
       return null;
     }
   }

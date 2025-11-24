@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.imtiaz"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.imtiaz"
@@ -19,7 +19,6 @@ android {
 
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -40,7 +39,7 @@ android {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 kotlin {

@@ -22,7 +22,7 @@ class SplashController extends GetxController {
 
   Future<void> _checkConnectivity() async {
     final connectivityResult = await Connectivity().checkConnectivity();
-    isOnline.value = connectivityResult != ConnectivityResult.none;
+    isOnline.value = !connectivityResult.contains(ConnectivityResult.none);
     if (!isOnline.value) {
       errorMessage.value = 'No internet connection. Please check your network.';
       isLoading.value = false;
